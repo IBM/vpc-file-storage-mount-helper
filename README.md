@@ -1,2 +1,2 @@
-This repository is maintaining IBM VPC munt-helper and mount-helper-container packages building and maintaining it.
+This repository is building and maintaining IBM VPC mount-helper and mount-helper-container packages.
 
