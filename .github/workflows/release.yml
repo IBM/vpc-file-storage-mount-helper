@@ -24,10 +24,10 @@ jobs:
       run: sudo apt install charon-systemd
 
     - name: Run Unit Tests
-      run: sudo make test --prefix ${{ matrix.package_dir }}
+      run: sudo make test -C ${{ matrix.package_dir }}
 
     - name: Build Debian/rpm Packages For Development Environment
-      run: make dev --prefix ${{ matrix.package_dir }}
+      run: make dev -C ${{ matrix.package_dir }}
 
     - name: Development Environment Latest Version
       id: dev-release
@@ -39,7 +39,7 @@ jobs:
         body: Mount Helper For Development Teams-GA
 
     - name: Build Debian/rpm Packages For Production Environment
-      run: make prod --prefix ${{ matrix.package_dir }}
+      run: make prod -C ${{ matrix.package_dir }}
 
     - name: Latest Tag Release
       id: latest-tag
