@@ -14,7 +14,6 @@ jobs:
       matrix:
         package_dir:
           - mount-helper
-          - mount-helper-container
 
     steps:
     - name: Checkout Code test
