@@ -17,7 +17,7 @@ jobs:
           - mount-helper-container
 
     steps:
-    - name: Checkout Code testing
+    - name: Checkout Code test
       uses: actions/checkout@v2
 
     - name: Install Strongswan For Testing IPSec Service In Unit Tests
