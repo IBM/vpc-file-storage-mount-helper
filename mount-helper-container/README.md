@@ -18,9 +18,9 @@ This is a REST based mount-helper-container service which is used for mounting E
 
 ## Package Dependencies
 
-| Mount Helper Container Version | Dependencies |
-|------|-------|
-| 1.0.0 | mount-helper-1.0.0 |
+| Mount Helper Container Version | Dependencies | Release |
+|------|-------|------|
+| 0.0.2 | mount.ibmshare-0.0.3 | v0.0.5 |
 
 ## Package Building
 
