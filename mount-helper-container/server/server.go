@@ -150,7 +150,8 @@ func handleMounting(sysOp SystemOperation) gin.HandlerFunc {
 			logger.Error("Mounting failed with error: ", zap.Error(err))
 			logger.Error("Command output: ", zap.String("output", output))
 			response := gin.H{
-				"Error:": err.Error(),
+				"MountExitCode": err.Error(),
+				"Description":   output,
 			}
 			c.JSON(http.StatusInternalServerError, response)
 			return
@@ -182,7 +183,8 @@ func handleUnMount(sysOp SystemOperation) gin.HandlerFunc {
 			logger.Error("Umount failed with error: ", zap.Error(err))
 			logger.Error("Command output: ", zap.String("output", output))
 			response := gin.H{
-				"Error:": err.Error(),
+				"MountExitCode": err.Error(),
+				"Description":   output,
 			}
 			c.JSON(http.StatusInternalServerError, response)
 			return
@@ -211,7 +213,8 @@ func debugLogs(sysOp SystemOperation) gin.HandlerFunc {
 			logger.Error("Unable to fetch logs, error: ", zap.Error(err))
 			logger.Error("Command output: ", zap.String("output", output))
 			response := gin.H{
-				"Error:": err.Error(),
+				"MountExitCode": err.Error(),
+				"Description":   output,
 			}
 			c.JSON(http.StatusInternalServerError, response)
 			return
@@ -252,12 +255,13 @@ func mountStatus(sysOp SystemOperation) gin.HandlerFunc {
 
 		logger.Info("New find mount request with values: ", zap.String("Target Path:", request.TargetPath))
 
-		_, err := sysOp.Execute("findmnt", request.TargetPath)
+		output, err := sysOp.Execute("findmnt", request.TargetPath)
 
 		if err != nil {
 			logger.Error("'findmnt' failed with error: ", zap.Error(err))
 			response := gin.H{
-				"Error:": err.Error(),
+				"MountExitCode": err.Error(),
+				"Description":   output,
 			}
 			c.JSON(http.StatusInternalServerError, response)
 			return
