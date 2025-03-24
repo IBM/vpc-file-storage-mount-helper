@@ -20,6 +20,8 @@ META_PORT_HTTP = 80
 META_PORT_HTTPS = 443
 META_URL_TOKEN = "instance_identity/v1/token" 
 META_URL_CERT = "instance_identity/v1/certificates"
+BM_META_URL_TOKEN = "identity/v1/token" 
+BM_META_URL_CERT = "identity/v1/certificates"
 META_URL_INSTANCE = "metadata/v1/instance"
 META_VERSION = "2022-03-01"
 META_FLAVOUR = "ibm"
@@ -183,7 +185,10 @@ class Metadata(CertificateHandler):
         return req
 
     def get_token(self):
-        req = self.new_request(META_URL_TOKEN)
+        if self.server == "baremetal":
+            req = self.new_request(BM_META_URL_TOKEN)
+        else:
+            req = self.new_request(META_URL_TOKEN)
         req.add_header("Metadata-Flavor", META_FLAVOUR)
         if not req.put():
             return False
@@ -200,8 +205,11 @@ class Metadata(CertificateHandler):
         if (not expires_in or int(expires_in) < META_CERTIFICATE_DURATION_MIN
                or int(expires_in) > META_CERTIFICATE_DURATION_MAX):
             expires_in = str(META_CERTIFICATE_DURATION_MAX)
-
-        req = self.new_request(META_URL_CERT, self.token)
+        
+        if self.server == "baremetal":
+            req = self.new_request(BM_META_URL_CERT, self.token)
+        else:
+            req = self.new_request(META_URL_CERT, self.token)
         req.set_data('{"csr": "' + self.csr + '", "expires_in": ' + expires_in + '}')
         if not req.post():
             return False
