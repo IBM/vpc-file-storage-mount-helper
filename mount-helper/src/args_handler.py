@@ -24,7 +24,8 @@ MOUNT_OPTION_IPSEC = "ipsec"
 MOUNT_OPTION_STUNNEL = "stunnel"
 SBIN_SCRIPT = "/sbin/mount.ibmshare"
 TEARDOWN_APP = "-TEARDOWN_APP"
-TLS_ENABLED_OS = ["Ubuntu 24.04", "Red Hat Enterprise Linux 9.4", "Rocky Linux 9.4"]
+TLS_ENABLED_OS= [ "Ubuntu 24.04","Red Hat Enterprise Linux 9.4","Rocky Linux 9.4" ]
+SERVER_ARG= "baremetal"
 
 
 class AppRunType(object):
@@ -91,9 +92,8 @@ class ArgsHandler(MountHelperBase):
             )
         if len(self.mount_point) <= 0:
             return self.LogError("Provide the mount point to mount on local host.")
-        self.options, self.is_secure, self.is_tls, self.is_stunnel = (
-            self.get_mount_options(args.o)
-        )
+        self.options, self.is_secure, self.is_tls = self.get_mount_options(args.o)
+        self.server=args.server
         return True
 
     @staticmethod
