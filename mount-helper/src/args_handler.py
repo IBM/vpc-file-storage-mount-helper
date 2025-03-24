@@ -24,7 +24,8 @@ MOUNT_OPTION_IPSEC = "ipsec"
 MOUNT_OPTION_STUNNEL = "stunnel"
 SBIN_SCRIPT = "/sbin/mount.ibmshare"
 TEARDOWN_APP = "-TEARDOWN_APP"
-TLS_ENABLED_OS = ["Ubuntu 24.04", "Red Hat Enterprise Linux 9.4", "Rocky Linux 9.4"]
+TLS_ENABLED_OS= [ "Ubuntu 24.04","Red Hat Enterprise Linux 9.4","Rocky Linux 9.4" ]
+SERVER_ARG= "baremetal"
 
 
 class AppRunType(object):
