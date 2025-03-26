@@ -148,6 +148,8 @@ class Metadata(CertificateHandler):
         self.created_at = None
         self.expires_at = None
         self.port = None
+        self.server="default"
+        self.server=self.detect_virtualization()
 
     def is_metadata_service_available(self):
         if self.is_port_available(META_IP, META_PORT_HTTP):
@@ -186,8 +188,10 @@ class Metadata(CertificateHandler):
 
     def get_token(self):
         if self.server == "baremetal":
+            self.LogInfo("It's a Baremetal Server")
             req = self.new_request(BM_META_URL_TOKEN)
         else:
+            self.LogInfo("It's a Virtual Server")
             req = self.new_request(META_URL_TOKEN)
         req.add_header("Metadata-Flavor", META_FLAVOUR)
         if not req.put():
@@ -244,3 +248,22 @@ class Metadata(CertificateHandler):
     def new_certificate_signing_request(self):
         self.csr = self.generate_csr(self.private_key)
         return not is_empty(self.csr)
+    
+    def detect_virtualization(self):
+        self.server="default"
+        try:
+            result = subprocess.run(
+            ['systemd-detect-virt'],
+            capture_output=True,
+            text=True,
+            check=True  # Raise an error if the command fails
+        )
+            type=result.stdout.strip()
+            if type=="none":
+                self.server="baremetal"
+            return self.server
+        except subprocess.CalledProcessError as e:
+             sys.exit(0)
+        except FileNotFoundError:
+            self.LogError("Error: 'systemd-detect-virt' not found. Are you on a systemd-based Linux system?")
+            sys.exit(0)
