@@ -13,6 +13,7 @@ import ssl
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
+from datetime import datetime
 
 USE_METADATA_SERVICE = True
 META_IP = "169.254.169.254"
@@ -24,6 +25,7 @@ BM_META_URL_TOKEN = "identity/v1/token"
 BM_META_URL_CERT = "identity/v1/certificates"
 META_URL_INSTANCE = "metadata/v1/instance"
 META_VERSION = "2022-03-01"
+BM_META_VERSION= datetime.now().strftime("%Y-%m-%d")
 META_FLAVOUR = "ibm"
 META_TIMEOUT = 20
 META_CERTIFICATE_DURATION_MIN = 300
@@ -84,7 +86,10 @@ class JsonRequest(MountHelperBase):
         try:
             url = self.url
             if len(self.params) > 0:
-                url += "?" + urlencode(self.params)
+                if self.server == "virtual":
+                    url += "?" + urlencode(self.params)
+                else:
+                    url += "?" + urlencode(self.params) + "&maturity=development"
 
             data = self.data.encode("utf-8") if self.data else None
 
@@ -151,6 +156,8 @@ class Metadata(CertificateHandler):
         self.created_at = None
         self.expires_at = None
         self.port = None
+        self.server="virtual"
+        self.server=self.detect_virtualization()
 
     def is_metadata_service_available(self):
         if self.is_port_available(META_IP, META_PORT_HTTP):
@@ -179,16 +186,21 @@ class Metadata(CertificateHandler):
         req.init_request(url, META_TIMEOUT)
         if use_ssl:
             req.create_ssl_context()
-        req.add_header("Accept", "application/json")
-        req.add_param("version", META_VERSION)
+        req.add_header('Accept', 'application/json')
+        if self.server == "baremetal":
+            req.add_param("version", BM_META_VERSION)
+        else:
+            req.add_param("version", META_VERSION)
         if token:
             req.add_header("Authorization", "Bearer " + token)
         return req
 
     def get_token(self):
         if self.server == "baremetal":
+            self.LogInfo("It's a Baremetal Server")
             req = self.new_request(BM_META_URL_TOKEN)
         else:
+            self.LogInfo("It's a Virtual Server")
             req = self.new_request(META_URL_TOKEN)
         req.add_header("Metadata-Flavor", META_FLAVOUR)
         if not req.put():
@@ -248,3 +260,23 @@ class Metadata(CertificateHandler):
     def new_certificate_signing_request(self):
         self.csr = self.generate_csr(self.private_key)
         return not is_empty(self.csr)
+    
+    def detect_virtualization(self):
+        try:
+            result = subprocess.run(
+            ['systemd-detect-virt'],
+            capture_output=True,
+            text=True
+             )
+            type = result.stdout.strip()
+            if result.returncode == 0:
+                return "virtual"
+            elif result.returncode == 1:
+            # Exit code 1 means "no virtualization" = baremetal
+                return "baremetal"
+            else:
+                self.LogError(f"Unexpected return code from systemd-detect-virt: {result.returncode}")
+                return "virtual"
+        except FileNotFoundError:
+            self.LogError("Error: 'systemd-detect-virt' not found. Are you on a systemd-based Linux system?")
+            return "virtual"
