@@ -20,6 +20,8 @@ META_PORT_HTTP = 80
 META_PORT_HTTPS = 443
 META_URL_TOKEN = "instance_identity/v1/token" 
 META_URL_CERT = "instance_identity/v1/certificates"
+BM_META_URL_TOKEN = "identity/v1/token" 
+BM_META_URL_CERT = "identity/v1/certificates"
 META_URL_INSTANCE = "metadata/v1/instance"
 META_VERSION = "2022-03-01"
 META_FLAVOUR = "ibm"
@@ -146,6 +148,8 @@ class Metadata(CertificateHandler):
         self.created_at = None
         self.expires_at = None
         self.port = None
+        self.server="default"
+        self.server=self.detect_virtualization()
 
     def is_metadata_service_available(self):
         if self.is_port_available(META_IP, META_PORT_HTTP):
@@ -183,7 +187,12 @@ class Metadata(CertificateHandler):
         return req
 
     def get_token(self):
-        req = self.new_request(META_URL_TOKEN)
+        if self.server == "baremetal":
+            self.LogInfo("It's a Baremetal Server")
+            req = self.new_request(BM_META_URL_TOKEN)
+        else:
+            self.LogInfo("It's a Virtual Server")
+            req = self.new_request(META_URL_TOKEN)
         req.add_header("Metadata-Flavor", META_FLAVOUR)
         if not req.put():
             return False
@@ -200,8 +209,11 @@ class Metadata(CertificateHandler):
         if (not expires_in or int(expires_in) < META_CERTIFICATE_DURATION_MIN
                or int(expires_in) > META_CERTIFICATE_DURATION_MAX):
             expires_in = str(META_CERTIFICATE_DURATION_MAX)
-
-        req = self.new_request(META_URL_CERT, self.token)
+        
+        if self.server == "baremetal":
+            req = self.new_request(BM_META_URL_CERT, self.token)
+        else:
+            req = self.new_request(META_URL_CERT, self.token)
         req.set_data('{"csr": "' + self.csr + '", "expires_in": ' + expires_in + '}')
         if not req.post():
             return False
@@ -236,3 +248,22 @@ class Metadata(CertificateHandler):
     def new_certificate_signing_request(self):
         self.csr = self.generate_csr(self.private_key)
         return not is_empty(self.csr)
+    
+    def detect_virtualization(self):
+        self.server="default"
+        try:
+            result = subprocess.run(
+            ['systemd-detect-virt'],
+            capture_output=True,
+            text=True,
+            check=True  # Raise an error if the command fails
+        )
+            type=result.stdout.strip()
+            if type=="none":
+                self.server="baremetal"
+            return self.server
+        except subprocess.CalledProcessError as e:
+             sys.exit(0)
+        except FileNotFoundError:
+            self.LogError("Error: 'systemd-detect-virt' not found. Are you on a systemd-based Linux system?")
+            sys.exit(0)
