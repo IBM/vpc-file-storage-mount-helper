@@ -24,6 +24,7 @@ BM_META_URL_TOKEN = "identity/v1/token"
 BM_META_URL_CERT = "identity/v1/certificates"
 META_URL_INSTANCE = "metadata/v1/instance"
 META_VERSION = "2022-03-01"
+BM_META_VERSION = "2025-04-27"
 META_FLAVOUR = "ibm"
 META_TIMEOUT = 20
 META_CERTIFICATE_DURATION_MIN = 300
@@ -181,7 +182,10 @@ class Metadata(CertificateHandler):
         if use_ssl:
             req.create_ssl_context()
         req.add_header('Accept', 'application/json')
-        req.add_param("version", META_VERSION)
+        if self.server == "baremetal":
+            req.add_param("version", BM_META_VERSION)
+        else:
+            req.add_param("version", META_VERSION)
         if token:
             req.add_header("Authorization", "Bearer " + token)
         return req
