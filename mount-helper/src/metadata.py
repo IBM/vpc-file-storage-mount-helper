@@ -18,13 +18,11 @@ USE_METADATA_SERVICE = True
 META_IP = "169.254.169.254"
 META_PORT_HTTP = 80
 META_PORT_HTTPS = 443
-META_URL_TOKEN = "instance_identity/v1/token" 
-META_URL_CERT = "instance_identity/v1/certificates"
-BM_META_URL_TOKEN = "identity/v1/token" 
-BM_META_URL_CERT = "identity/v1/certificates"
+META_URL_TOKEN = "identity/v1/tokens" 
+META_URL_CERT = "identity/v1/certificates"
 META_URL_INSTANCE = "metadata/v1/instance"
-META_VERSION = "2022-03-01"
-BM_META_VERSION = "2025-04-27"
+#META_VERSION = "2022-03-01"
+META_VERSION="$(date +%F)"
 META_FLAVOUR = "ibm"
 META_TIMEOUT = 20
 META_CERTIFICATE_DURATION_MIN = 300
@@ -85,7 +83,7 @@ class JsonRequest(MountHelperBase):
         try:
             url = self.url
             if len(self.params) > 0:
-                url += "?" + urlencode(self.params)
+                url += "?" + urlencode(self.params) + "&maturity=development"
 
             data = self.data.encode('utf-8') if self.data else None
 
@@ -182,10 +180,7 @@ class Metadata(CertificateHandler):
         if use_ssl:
             req.create_ssl_context()
         req.add_header('Accept', 'application/json')
-        if self.server == "baremetal":
-            req.add_param("version", BM_META_VERSION)
-        else:
-            req.add_param("version", META_VERSION)
+        req.add_param("version", META_VERSION)
         if token:
             req.add_header("Authorization", "Bearer " + token)
         return req
@@ -193,10 +188,9 @@ class Metadata(CertificateHandler):
     def get_token(self):
         if self.server == "baremetal":
             self.LogInfo("It's a Baremetal Server")
-            req = self.new_request(BM_META_URL_TOKEN)
         else:
             self.LogInfo("It's a Virtual Server")
-            req = self.new_request(META_URL_TOKEN)
+        req = self.new_request(META_URL_TOKEN)
         req.add_header("Metadata-Flavor", META_FLAVOUR)
         if not req.put():
             return False
@@ -213,11 +207,7 @@ class Metadata(CertificateHandler):
         if (not expires_in or int(expires_in) < META_CERTIFICATE_DURATION_MIN
                or int(expires_in) > META_CERTIFICATE_DURATION_MAX):
             expires_in = str(META_CERTIFICATE_DURATION_MAX)
-        
-        if self.server == "baremetal":
-            req = self.new_request(BM_META_URL_CERT, self.token)
-        else:
-            req = self.new_request(META_URL_CERT, self.token)
+        req = self.new_request(META_URL_CERT, self.token)
         req.set_data('{"csr": "' + self.csr + '", "expires_in": ' + expires_in + '}')
         if not req.post():
             return False
