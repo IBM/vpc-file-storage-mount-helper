@@ -157,10 +157,12 @@ class RenewCerts(metadata.Metadata):
 
         regions = cfg.load_regions()
         if not regions:
+            print("SKIP: No regions found in config")
             return False
 
         install_cas = cfg.get_files_for_regions(regions)
         if not install_cas:
+            print("SKIP: No certs found for regions:", regions)
             return False
 
         ipsec = self.get_ipsec_mgr()
@@ -181,6 +183,7 @@ class RenewCerts(metadata.Metadata):
 
         ipsec2 = clone_obj(ipsec)
         if not ipsec2.flatten_paths(cert_path):
+            print("ipsec2.flatten_paths return false")
             return False
 
         # load root CA certs
@@ -193,6 +196,7 @@ class RenewCerts(metadata.Metadata):
                         self.ReadFile(ca)):
                     return False
             if not ipsec.reload_certs(root=True):
+                print("ipsec.reload_cert return false")
                 return False
         elif init:
             return self.LogError("No root CA cert(s) found.")
