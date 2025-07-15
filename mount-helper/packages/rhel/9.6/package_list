@@ -1,0 +1,5 @@
+epel-release
+strongswan
+strongswan-sqlite
+nfs-utils
+libnftnl
