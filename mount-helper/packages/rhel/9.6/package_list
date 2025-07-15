@@ -3,3 +3,8 @@ strongswan
 strongswan-sqlite
 nfs-utils
 libnftnl
+libnfnetlink
+libnetfilter_conntrack
+iptables-libs
+iptables-legacy-libs
+iptables-legacy
