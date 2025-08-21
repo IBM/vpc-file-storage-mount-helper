@@ -142,19 +142,19 @@ func handleMounting(sysOp SystemOperation) gin.HandlerFunc {
 		logger.Info("New mount request with values: ", zap.String("RequestID:", request.RequestID), zap.String("Source mount Path:", request.MountPath), zap.String("Target Path:", request.TargetPath))
 
 		// Form mount command options on basis of transit encryption value
-		var output, command string
+		var output string
 		var err error
 		switch request.TransitEncryption {
 		case "ipsec":
 			logger.Info("Transit encryption is set to ipsec, using ipsec options for mounting.")
-			command = "mount -t " + request.FsType + " -o secure=true " + request.MountPath + " " + request.TargetPath + " -v"
-			logger.Info("Command to execute is: ", zap.String("Command:", command))
-			output, err = sysOp.Execute(command)
+			//command = "mount -t " + request.FsType + " -o secure=true " + request.MountPath + " " + request.TargetPath + " -v"
+			//logger.Info("Command to execute is: ", zap.String("Command:", command))
+			output, err = sysOp.Execute("mount", "-t", request.FsType, "-o", "secure=true", request.MountPath, request.TargetPath, "-v")
 		case "stunnel":
 			logger.Info("Transit encryption is set to stunnel, using stunnel options for mounting.")
-			command = "mount -t " + request.FsType + " -o stunnel " + request.MountPath + " " + request.TargetPath + " -v"
-			logger.Info("Command to execute is: ", zap.String("Command:", command))
-			output, err = sysOp.Execute(command)
+			// command = "mount -t " + request.FsType + " -o stunnel " + request.MountPath + " " + request.TargetPath + " -v"
+			// logger.Info("Command to execute is: ", zap.String("Command:", command))
+			output, err = sysOp.Execute("mount", "-t", request.FsType, "-o", "stunnel", request.MountPath, request.TargetPath, "-v")
 		default:
 			logger.Error("Invalid transit encryption value provided: ", zap.String("Transit Encryption:", request.TransitEncryption))
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid transit encryption value"})
