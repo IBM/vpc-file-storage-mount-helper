@@ -55,7 +55,9 @@ declare -A region_map=(
     ["tor"]="ca-tor"
     ["ca-tor"]="ca-tor" 
     ["sao"]="br-sao"
-    ["br-sao"]="br-sao" 
+    ["br-sao"]="br-sao"
+    ["par"]="eu-fr2"
+    ["eu-fr2"]="eu-fr2" 
     )
 
 
