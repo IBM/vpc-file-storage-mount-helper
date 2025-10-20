@@ -60,8 +60,55 @@ declare -A region_map=(
     ["br-sao"]="br-sao"
     ["par"]="eu-fr2"
     ["eu-fr2"]="eu-fr2"
-    )
+)
 
+ENVIRONMENT="prod"          # prod | stage
+SKIP_UPDATE="false"         # true | false
+TLS_FLAG="false"            # true | false
+UNINSTALL_FLAG="false"      # true | false
+STUNNEL_ENABLED=false       # flipped true by --stunnel
+
+parse_token() {
+  case "$1" in
+    stage|--env=stage) ENVIRONMENT="stage" ;;
+    --env=prod)        ENVIRONMENT="prod"  ;;
+    --update)          SKIP_UPDATE="true"  ;;
+    --update-stage)    ENVIRONMENT="stage"; SKIP_UPDATE="true" ;;
+    --tls)             TLS_FLAG="true"     ;;
+    --uninstall|--uninstall*) UNINSTALL_FLAG="true" ;;
+    --stunnel)         STUNNEL_ENABLED=true ;;
+    region=*)          : ;;  
+    "" )               : ;;
+    *)                 : ;;  # ignore unknowns
+  esac
+}
+for tok in "$@"; do parse_token "$tok"; done
+
+# Normalize legacy positional vars so the rest of the script keeps working.
+# Many checks key off INSTALL_ARG for "stage", "--update", "--update-stage".
+if [ "$UNINSTALL_FLAG" = "true" ]; then
+  INSTALL_ARG="--uninstall"
+else
+  if [[ "${1:-}" == region=* ]]; then
+    : # leave INSTALL_ARG as-is (region=...)
+  else
+    if [ "$SKIP_UPDATE" = "true" ]; then
+      if [ "$ENVIRONMENT" = "stage" ]; then
+        INSTALL_ARG="--update-stage"
+      else
+        INSTALL_ARG="--update"
+      fi
+    else
+      if [ "$ENVIRONMENT" = "stage" ]; then
+        INSTALL_ARG="stage"
+      fi
+    fi
+  fi
+fi
+
+if [ "$TLS_FLAG" = "true" ]; then
+  INSTALL_MOUNT_OPTION_ARG="--tls"
+fi
 
 not_for_ppc () {
     echo $@ is not needed for PPC architechture since Ipsec is not supported. Silently ignoring.
@@ -568,9 +615,7 @@ init_mount_helper () {
         INSTALL_ARG=""
     fi
 
-    if [[ "$INSTALL_MOUNT_OPTION_ARG" == "stage" ]]; then
-        exit_err "incorrect command, pass stage as first arg."
-    fi
+    # Accept 'stage' in any position; no error if it was passed as $2
     if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
         check_tls_supported_linux_verion
     fi
@@ -581,6 +626,16 @@ init_mount_helper () {
         check_result "Problem installing ssl certs"
         if [[ "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
             install_tls_certificates $CERT_PATH
+        fi
+        # If stunnel mode was selected, install it in stage too
+        if [ "$STUNNEL_ENABLED" = "true" ]; then
+            if [ -x "./install_stunnel.sh" ]; then
+                echo "STUNNEL selected: installing stunnel (stage)..."
+                ./install_stunnel.sh install
+            else
+                echo "Error: install_stunnel.sh not found or not executable in current directory."
+                exit 1
+            fi
         fi
         exit_ok "Install completed ok"
     fi
@@ -593,7 +648,7 @@ init_mount_helper () {
         INSTALL_ARG="metadata"
     fi
 
-   	log "Installing certs for: $INSTALL_ARG"
+    log "Installing certs for: $INSTALL_ARG"
     CERT_PATH="./certs/$INSTALL_ARG"
     if [ ! -d $CERT_PATH ]; then
         exit_err "$CERT_PATH cert folder does not exist"
@@ -604,7 +659,7 @@ init_mount_helper () {
     $SBIN_SCRIPT -INSTALL_ROOT_CERT $CERT_PATH
     check_result "Problem installing ssl certs"
     if [[ "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
-      	install_tls_certificates $CERT_PATH
+        install_tls_certificates $CERT_PATH
     fi
     # Check if STUNNEL_ENABLED is set to true
     if [ "$STUNNEL_ENABLED" == "true" ]; then
@@ -623,14 +678,12 @@ init_mount_helper () {
 
 # main starts here.
 #
-if [[ "$INSTALL_ARG" == "--stunnel" ]]; then
-        STUNNEL_INSTALL_CMD="./install_stunnel.sh install"
-        STUNNEL_ENABLED=true
+if [ "$STUNNEL_ENABLED" = "true" ]; then
+  STUNNEL_INSTALL_CMD="./install_stunnel.sh install"
 else
-        STUNNEL_INSTALL_CMD="echo skipping stunnel..."
-
+  STUNNEL_INSTALL_CMD=":"
+  echo "skipping stunnel..."
 fi
-
 
 reject_ipsec && setup_share_config
 
@@ -698,7 +751,7 @@ if is_linux LINUX_RED_HAT; then
 
         # Read the package list from the file
         packages=()
-       	while IFS= read -r line; do
+        while IFS= read -r line; do
             packages+=("$line")
         done < "$PACKAGE_LIST_PATH"
 
