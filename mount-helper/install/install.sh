@@ -60,6 +60,9 @@ declare -A region_map=(
     ["br-sao"]="br-sao"
     ["par"]="eu-fr2"
     ["eu-fr2"]="eu-fr2"
+    ["ca-mon"]="ca-mon"
+    ["in-che"]="in-che"
+    ["in-mum"]="in-mum"
 )
 
 ENVIRONMENT="prod"          # prod | stage
