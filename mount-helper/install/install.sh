@@ -524,19 +524,41 @@ check_python3_installed () {
     	fi
     fi
 
+    # ---------- RHEL OFFLINE PATH ----------
     if is_linux LINUX_RED_HAT; then
-        PYTHON3_PACKAGE=packages/rhel/$VERSION/python*.rpm
-    elif ( is_linux LINUX_UBUNTU || is_linux LINUX_DEBIAN ); then
-        PYTHON3_PACKAGE=packages/ubuntu/$VERSION/python*.deb
+        PYTHON_RPM_GLOB="packages/rhel/$VERSION/python*.rpm"
+
+        if command_not_exist python3; then
+            log "Python3 not found. Installing from local RPMs (offline mode)."
+
+            if ! ls $PYTHON_RPM_GLOB >/dev/null 2>&1; then
+                exit_err "Python RPMs not found at $PYTHON_RPM_GLOB"
+            fi
+
+            rpm -i $PYTHON_RPM_GLOB --force --nodeps
+            check_result "Failed to install Python RPMs"
+        fi
+
+    # ---------- UBUNTU / DEBIAN ----------
+    elif is_linux LINUX_UBUNTU || is_linux LINUX_DEBIAN; then
+        PYTHON3_PACKAGE="packages/ubuntu/$VERSION/python*.deb"
+
+        if command_not_exist python3; then
+            if [ -z "$PYTHON3_PACKAGE" ]; then
+                exit_err "Python3 not installed"
+            fi
+            _install_apps "$PYTHON3_PACKAGE"
+        fi
+
+    # ---------- FALLBACK (OTHER DISTROS) ----------
     else
-        PYTHON3_PACKAGE=$1
+        if command_not_exist python3; then
+            if [ -z "$1" ]; then
+                exit_err "Python3 not installed"
+            fi
+            _install_apps "$1"
+        fi
     fi
-    if command_not_exist python3; then
-        if [ "$PYTHON3_PACKAGE" == "" ]; then
-            exit_err "Python3 not installed"
-        fi;
-        _install_apps "$PYTHON3_PACKAGE"
-    fi;
     PYTHON3_VERSION="$(get_current_python_version)"
     if version_less_than $PYTHON3_VERSION $MIN_PYTHON3_VERSION; then
         exit_err  "Can only install with Python3 version $MIN_PYTHON3_VERSION or greater. Current version:$PYTHON3_VERSION"
