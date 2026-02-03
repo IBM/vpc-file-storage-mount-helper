@@ -116,9 +116,9 @@ install_stunnel_rhel_centos_rocky() {
 
     echo "Installing from: ${PKG_DIR}/stunnel*.rpm"
     if command -v dnf >/dev/null 2>&1; then
-        sudo dnf -y install "$PKG_DIR"/stunnel*.rpm --disablerepo='*' --setopt=install_weak_deps=False
+        sudo dnf -y install --disablerepo='*' --disableplugin='*' --setopt=install_weak_deps=False "$PKG_DIR"/stunnel*.rpm
     else
-        sudo yum -y localinstall "$PKG_DIR"/stunnel*.rpm
+        sudo yum -y install --disablerepo='*' --disableplugin='*' --nogpgcheck "$PKG_DIR"/stunnel*.rpm
     fi
 
     setup_stunnel_directories
