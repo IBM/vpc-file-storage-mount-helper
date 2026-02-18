@@ -856,7 +856,7 @@ elif is_linux LINUX_CENTOS; then
     done < "$PACKAGE_LIST_PATH"
 
     if [ "$INSTALL_ARG" != "--uninstall" ]; then
-        dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+        sudo dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
     fi
 
     # Install the packages in the defined order
@@ -939,15 +939,15 @@ elif is_linux LINUX_SUSE; then
 
 elif is_linux LINUX_FEDORA; then
     echo "Locked down distro not supported"
-fi
+fi;
 
-# add a condition for coreos - 
+# add a condition for coreos 
 # if install_arg == "--cert": then call init_mount_helper and setup_strongswan_restart_service, remove this method call from normal flow for coreos, since after reboot only ibmshare and strongswan package is available  
 if  is_linux LINUX_RED_HAT_COREOS; then
     if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]];  then
         setup_strongswan_restart_service
         init_mount_helper
     fi
-fi;
+fi
 
 exit_err "IbmMountHelper Install not supported $NAME $VERSION"
