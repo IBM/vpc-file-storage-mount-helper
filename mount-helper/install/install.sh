@@ -36,6 +36,7 @@ LINUX_ROCKY=("Rocky Linux"       "8"            "$YUM")
 LINUX_FEDORA=("Fedora Linux"     $NA            $NA)
 LINUX_SUSE=("SLES"               "12"           "$ZYP")
 LINUX_RED_HAT=("Red Hat Enterprise Linux" "7" "$YUM")
+LINUX_RHCOS=("Red Hat Enterprise Linux CoreOS" "4" "rpm-ostree")
 
 declare -A region_map=(
     ["dal"]="us-south"
@@ -128,7 +129,7 @@ is_linux () {
     local _NAME=${ARRAY[0]}
     local _MIN_VER=${ARRAY[1]}
 
-    if [[ "$NAME" == "$_NAME"* ]]; then
+    if [[ "$_NAME" == "Red Hat Enterprise Linux CoreOS" && "$NAME" == "$_NAME" ]]; then
         check_linux_version $_MIN_VER
         log "Linux version supported - $NAME ($VERSION)"
         set_install_app "${ARRAY[2]}"
@@ -779,6 +780,17 @@ fi;
 
 if is_linux LINUX_FEDORA; then
     echo "Locked down distro not supported"
+elif is_linux LINUX_RHCOS; then
+    echo "Detected RHCOS"
+
+    check_python3_installed python3
+
+    if [[ "$STUNNEL_ENABLED" == "true" ]]; then
+        ./install_stunnel.sh install
+        exit $?
+    fi
+
+    exit_err "Only --stunnel flow supported on RHCOS in this version"
 fi;
 
 

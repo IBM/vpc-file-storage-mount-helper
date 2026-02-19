@@ -214,7 +214,14 @@ detect_and_handle() {
     # Source the OS release file
     . /etc/os-release
 
-    case "$ID" in
+    if [[ "$ID" == "rhcos" ]] || [[ "$VARIANT" == *"coreos"* ]]; then
+        OS_TYPE="rhcos"
+    else
+        OS_TYPE="$ID"
+    fi
+
+    case "$OS_TYPE" in
+
     ubuntu|debian)
         if [ "$ACTION" == "$INSTALL" ]; then
             install_stunnel_ubuntu_debian
@@ -229,6 +236,32 @@ detect_and_handle() {
             uninstall_stunnel_rhel_centos_rocky
         fi
         ;;
+    rhcos)
+    if [ "$ACTION" == "$INSTALL" ]; then
+        echo "Installing stunnel on RHCOS using rpm-ostree"
+
+        rpm-ostree install -y --idempotent stunnel
+        rpm-ostree apply-live
+
+        setup_stunnel_directories
+        create_stunnel_cert_if_installed
+
+        store_trusted_ca_file_name "/etc/pki/tls/certs/ca-bundle.crt"
+        store_stunnel_env
+        store_arch_env
+
+        if command -v stunnel > /dev/null; then
+            echo "stunnel installed successfully on RHCOS!"
+        else
+            echo "Failed to install stunnel on RHCOS."
+            exit 1
+        fi
+
+    elif [ "$ACTION" == "$UNINSTALL" ]; then
+        rpm-ostree uninstall -y --idempotent stunnel
+        echo "stunnel removed from RHCOS"
+    fi
+    ;;    
     suse|sles)
         if [ "$ACTION" == "$INSTALL" ]; then
             install_stunnel_suse
