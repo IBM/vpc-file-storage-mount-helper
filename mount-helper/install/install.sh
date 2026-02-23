@@ -130,8 +130,7 @@ is_linux () {
     local _NAME=${ARRAY[0]}
     local _MIN_VER=${ARRAY[1]}
     
-    if { [[ "$_NAME" == "Red Hat Enterprise Linux CoreOS" && "$NAME" == "$_NAME" ]]; } || { [[ "$_NAME" != "Red Hat Enterprise Linux CoreOS" && "$NAME" == "$_NAME"*  && "$NAME" != *"CoreOS"* ]]; }; then
-
+    if [[ "$NAME" == "$_NAME" ]]; then
         check_linux_version $_MIN_VER
         log "Linux version supported - $NAME ($VERSION)"
         set_install_app "${ARRAY[2]}"
@@ -360,6 +359,30 @@ remove_strongswan_restart_service() {
     fi
 }
 
+remove_load_cert_service() {
+
+    # Check if systemd is available
+    if [ "$(ps -p 1 -o comm=)" = "systemd" ] && systemctl > /dev/null 2>&1; then
+
+        if is_linux LINUX_RED_HAT_COREOS; then
+            # Stop the service if it is running
+            systemctl stop load-cert.service
+
+            # Disable the service
+            systemctl disable load-cert.service
+
+            # Remove the service unit file
+            rm /etc/systemd/system/load-cert.service
+
+            # Remove the load-cert.done file
+            rm -f "/var/lib/load-cert.done"
+
+            # Reload systemd configuration
+            systemctl daemon-reload
+        fi
+        echo "Load Cert service removed."
+    fi
+}
 
 _install_app() {
     PACKAGE_NAME=$1
@@ -519,6 +542,9 @@ install_apps() {
         if is_linux LINUX_SUSE; then
            reject_ipsec ||  sudo systemctl unmask strongswan.service
         fi
+        if is_linux LINUX_RED_HAT_COREOS; then
+            remove_load_cert_service
+        fi
         # Check if stunnel is installed
         if command -v stunnel >/dev/null 2>&1; then
             echo "STUNNEL is installed. Please run './install_stunnel.sh uninstall' to uninstall it..."
@@ -649,11 +675,13 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
     SERVICE_UNIT_CONTENT="[Unit]
     Description=Restart StrongSwan service and load the cert using same install.sh script
     After=network.target multi-user.target
+    ConditionPathExists=!/var/lib/load-cert.done
 
     [Service]
     Type=oneshot
     WorkingDirectory=/root
-    ExecStart=/usr/local/bin/install-service.sh --cert
+    ExecStart=/usr/local/bin/install-service.sh --cert 
+    ExecStartPost=/usr/bin/touch /var/lib/load-cert.done
     RemainAfterExit=true
 
     [Install]
@@ -694,6 +722,27 @@ init_mount_helper () {
     if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
         check_tls_supported_linux_verion
     fi
+    # If Core OS and --cert is passed, install cert for stage and prod environment
+    if is_linux  LINUX_RED_HAT_COREOS ; then
+        if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]]; then
+
+            for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
+
+                ENV_NAME="${entry%%|*}"
+                CERT_PATH="${entry##*|}"
+
+                if [ ! -d "$CERT_PATH" ]; then
+                    exit_err "$CERT_PATH cert folder does not exist"
+                fi
+
+                log "Installing certs for $ENV_NAME environment..."
+                $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
+                check_result "Problem installing ssl certs"
+            done
+
+            exit_ok "Install completed ok"
+        fi
+    fi
     if [[ "$INSTALL_ARG" == "stage" || "$INSTALL_ARG" == "--update-stage" ]]; then
         CERT_PATH="./dev_certs/metadata"
         log "Installing certs for stage environment..."
@@ -706,7 +755,7 @@ init_mount_helper () {
     fi
 
 
-    if [[ "$INSTALL_ARG" == "" || "$INSTALL_ARG" == "--update" || "$INSTALL_ARG" == "--tls" || "$INSTALL_ARG" == "--stunnel"  || "$INSTALL_ARG" == "--cert" ]]; then
+    if [[ "$INSTALL_ARG" == "" || "$INSTALL_ARG" == "--update" || "$INSTALL_ARG" == "--tls" || "$INSTALL_ARG" == "--stunnel" ]]; then
         if [[ "$INSTALL_ARG" == "--tls" ]]; then
             INSTALL_MOUNT_OPTION_ARG="--tls"
         fi
@@ -796,8 +845,9 @@ if ( is_linux LINUX_UBUNTU || is_linux LINUX_DEBIAN ); then
     install_apps "${packages[@]}" mount.ibmshare*.deb
     setup_strongswan_restart_service
     init_mount_helper
+fi;
 
-elif is_linux LINUX_RED_HAT; then
+if is_linux LINUX_RED_HAT; then
     check_python3_installed python3
 
     if reject_ipsec
@@ -833,8 +883,9 @@ elif is_linux LINUX_RED_HAT; then
         setup_strongswan_restart_service
         init_mount_helper
     fi
+fi;
 
-elif is_linux LINUX_CENTOS; then
+if is_linux LINUX_CENTOS; then
     check_python3_installed python3
     if reject_ipsec
     then
@@ -863,17 +914,12 @@ elif is_linux LINUX_CENTOS; then
     install_apps "${packages[@]}" mount.ibmshare*.rpm
     setup_strongswan_restart_service
     init_mount_helper
+fi;
 
-elif is_linux LINUX_RED_HAT_COREOS; then
+if is_linux LINUX_RED_HAT_COREOS; then
     # Do not install packages if --cert option is passed, since it must be already installed 
     if [[ "$INSTALL_ARG" != "--cert" && "$INSTALL_MOUNT_OPTION_ARG" != "--cert" ]];  then
         check_python3_installed python3
-
-        if reject_ipsec
-        then
-            install_apps mount.ibmshare*.rpm && $STUNNEL_INSTALL_CMD
-            exit $?
-        fi
 
         if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
             # Define the path to the package list file based on the RHEL version
@@ -895,9 +941,6 @@ elif is_linux LINUX_RED_HAT_COREOS; then
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
             exit_ok "Install packages completed ok"
         
-            # remove below, called upon when --cert arg is provided, since after package installation reboot is required to load up strongswan and ibmshare pkg to trigger below
-            # setup_strongswan_restart_service
-            # init_mount_helper
         else
             if [ "$INSTALL_ARG" != "--uninstall" ]; then
                 rpm-ostree install --idempotent -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
@@ -906,13 +949,15 @@ elif is_linux LINUX_RED_HAT_COREOS; then
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
             exit_ok "Install packages completed ok"
 
-            # remove below
-            # setup_strongswan_restart_service
-            # init_mount_helper
         fi
+    # if install_arg == "--cert": then call init_mount_helper and setup_strongswan_restart_service, since after reboot only ibmshare and strongswan package is available  
+    elif [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]];  then
+        setup_strongswan_restart_service
+        init_mount_helper
     fi
+fi;
 
-elif is_linux LINUX_ROCKY; then
+if is_linux LINUX_ROCKY; then
     check_python3_installed python39
     if reject_ipsec
     then
@@ -923,8 +968,9 @@ elif is_linux LINUX_ROCKY; then
     install_apps epel-release strongswan strongswan-sqlite nfs-utils mount.ibmshare*.rpm
     setup_strongswan_restart_service
     init_mount_helper
+fi;
 
-elif is_linux LINUX_SUSE; then
+if is_linux LINUX_SUSE; then
     check_python3_installed
     if reject_ipsec
     then
@@ -936,18 +982,10 @@ elif is_linux LINUX_SUSE; then
     install_apps strongswan nfs-client mount.ibmshare*.rpm
     setup_strongswan_restart_service
     init_mount_helper
-
-elif is_linux LINUX_FEDORA; then
-    echo "Locked down distro not supported"
 fi;
 
-# add a condition for coreos 
-# if install_arg == "--cert": then call init_mount_helper and setup_strongswan_restart_service, remove this method call from normal flow for coreos, since after reboot only ibmshare and strongswan package is available  
-if  is_linux LINUX_RED_HAT_COREOS; then
-    if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]];  then
-        setup_strongswan_restart_service
-        init_mount_helper
-    fi
-fi
+if is_linux LINUX_FEDORA; then
+    echo "Locked down distro not supported"
+fi;
 
 exit_err "IbmMountHelper Install not supported $NAME $VERSION"
