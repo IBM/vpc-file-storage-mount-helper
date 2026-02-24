@@ -722,27 +722,6 @@ init_mount_helper () {
     if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
         check_tls_supported_linux_verion
     fi
-    # If Core OS and --cert is passed, install cert for stage and prod environment
-    if is_linux  LINUX_RED_HAT_COREOS ; then
-        if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]]; then
-
-            for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
-
-                ENV_NAME="${entry%%|*}"
-                CERT_PATH="${entry##*|}"
-
-                if [ ! -d "$CERT_PATH" ]; then
-                    exit_err "$CERT_PATH cert folder does not exist"
-                fi
-
-                log "Installing certs for $ENV_NAME environment..."
-                $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
-                check_result "Problem installing ssl certs"
-            done
-
-            exit_ok "Install completed ok"
-        fi
-    fi
     if [[ "$INSTALL_ARG" == "stage" || "$INSTALL_ARG" == "--update-stage" ]]; then
         CERT_PATH="./dev_certs/metadata"
         log "Installing certs for stage environment..."
@@ -788,6 +767,56 @@ init_mount_helper () {
         fi
     fi
     exit_ok "Install completed ok"
+}
+init_mount_helper_for_rhcos () {
+    if [[ "$INSTALL_ARG" == "region="* ]]; then
+        region_code="${INSTALL_ARG#region=}"
+        mapped_region="${region_map[$region_code]}"
+        if [ -n "$mapped_region" ]; then
+            log "Updating config file: $CONF_FILE"
+            sed -i "s/region=.*/region=$mapped_region/" $CONF_FILE
+        else
+            exit_err "Error: Invalid region code '$region_code'"
+        fi
+        INSTALL_ARG=""
+    fi
+
+    if [[ "$INSTALL_MOUNT_OPTION_ARG" == "stage" ]]; then
+        exit_err "incorrect command, pass stage as first arg."
+    fi
+    if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
+        check_tls_supported_linux_verion
+    fi
+    if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]]; then
+
+            for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
+
+                ENV_NAME="${entry%%|*}"
+                CERT_PATH="${entry##*|}"
+
+                if [ ! -d "$CERT_PATH" ]; then
+                    exit_err "$CERT_PATH cert folder does not exist"
+                fi
+
+                log "Installing certs for $ENV_NAME environment..."
+                $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
+                check_result "Problem installing ssl certs"
+            done
+    fi
+     # Check if STUNNEL_ENABLED is set to true
+    if [ "$STUNNEL_ENABLED" == "true" ]; then
+        echo "STUNNEL is enabled. Installing stunnel..."
+
+        # Make sure the script exists
+        if [ -x "./install_stunnel.sh" ]; then
+            ./install_stunnel.sh install
+        else
+            echo "Error: install_stunnel.sh not found or not executable in current directory."
+            exit 1
+        fi
+    fi
+    exit_ok "Install completed ok"
+
 }
 
 # main starts here.
@@ -919,7 +948,14 @@ fi;
 if is_linux LINUX_RED_HAT_COREOS; then
     # Do not install packages if --cert option is passed, since it must be already installed 
     if [[ "$INSTALL_ARG" != "--cert" && "$INSTALL_MOUNT_OPTION_ARG" != "--cert" ]];  then
+
         check_python3_installed python3
+
+        if reject_ipsec
+        then
+            install_apps mount.ibmshare*.rpm && $STUNNEL_INSTALL_CMD
+            exit $?
+        fi
 
         if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
             # Define the path to the package list file based on the RHEL version
@@ -939,6 +975,7 @@ if is_linux LINUX_RED_HAT_COREOS; then
             # Install the packages in the defined order
             install_apps "${packages[@]}" mount.ibmshare*.rpm
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            init_mount_helper_for_rhcos
             exit_ok "Install packages completed ok"
         
         else
@@ -947,13 +984,14 @@ if is_linux LINUX_RED_HAT_COREOS; then
             fi
             install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            init_mount_helper_for_rhcos
             exit_ok "Install packages completed ok"
 
         fi
-    # if install_arg == "--cert": then call init_mount_helper and setup_strongswan_restart_service, since after reboot only ibmshare and strongswan package is available  
+    # if install_arg == "--cert": then call etup_strongswan_restart_service, since after reboot only strongswan package is available  
     elif [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]];  then
         setup_strongswan_restart_service
-        init_mount_helper
+        init_mount_helper_for_rhcos
     fi
 fi;
 
