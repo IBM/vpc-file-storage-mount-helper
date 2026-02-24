@@ -238,50 +238,81 @@ detect_and_handle() {
         ;;
     rhcos)
     if [ "$ACTION" == "$INSTALL" ]; then
-        echo "Installing stunnel on RHCOS using rpm-ostree"
 
-        echo "Installing stunnel on RHCOS using rpm-ostree"
-        rpm-ostree install -y --idempotent stunnel
+        echo "RHCOS detected — preparing stunnel installation"
 
-        if [ $? -ne 0 ]; then
-            echo "Failed to install stunnel on RHCOS."
-            exit 1
-        fi
+        PACKAGE_DIR="packages/rhel/$VERSION"
+        OFFLINE_RPM=$(ls ${PACKAGE_DIR}/stunnel*.rpm 2>/dev/null)
 
-        echo ""
-        echo "=================================================="
-        echo "RHCOS detected."
-        echo "A reboot is REQUIRED to activate stunnel."
-        echo "Please reboot worker node manually:"
-        echo "    systemctl reboot"
-        echo "=================================================="
-        echo ""
+        #
+        # OFFLINE INSTALLATION (Preferred for IKS/ROKS)
+        #
+        if [ -n "$OFFLINE_RPM" ]; then
+            echo "Offline mode detected."
+            echo "Installing stunnel from local RPM package:"
+            echo "  $OFFLINE_RPM"
 
-        # NOTE:
-        # Runtime configuration will be completed after reboot
-        # since rpm-ostree installs packages in next deployment.
+            rpm-ostree install -y --idempotent $OFFLINE_RPM
+            INSTALL_RC=$?
 
-        if command -v stunnel > /dev/null; then
-            echo "stunnel installed successfully on RHCOS!"
-            echo ""
-            echo "=================================================="
-            echo "Reboot is required to activate rpm-ostree changes."
-            echo "Please reboot worker node manually:"
-            echo ""
-            echo "    sudo systemctl reboot"
-            echo ""
-            echo "After reboot, rerun mount command."
-            echo "=================================================="
+        #
+        # ONLINE FALLBACK (Dev/Test Only)
+        #
         else
-            echo "Failed to install stunnel on RHCOS."
+            echo "Offline RPM not found."
+            echo "Falling back to repository installation (dev/test environments only)."
+
+            rpm-ostree install -y --idempotent stunnel
+            INSTALL_RC=$?
+        fi
+
+        #
+        # INSTALL RESULT CHECK
+        #
+        if [ $INSTALL_RC -ne 0 ]; then
+            echo "ERROR: stunnel installation failed on RHCOS."
             exit 1
         fi
+
+        #
+        # IMPORTANT NOTE FOR RHCOS USERS
+        #
+        echo ""
+        echo "=================================================="
+        echo "stunnel has been layered using rpm-ostree."
+        echo ""
+        echo "A SYSTEM REBOOT IS REQUIRED to activate changes."
+        echo ""
+        echo "Please reboot the worker node manually:"
+        echo ""
+        echo "    systemctl reboot"
+        echo ""
+        echo "After reboot, rerun the mount operation."
+        echo "=================================================="
+        echo ""
+
+        exit 0
 
     elif [ "$ACTION" == "$UNINSTALL" ]; then
+
+        echo "Removing stunnel from RHCOS using rpm-ostree"
+
         rpm-ostree uninstall -y --idempotent stunnel
-        echo "stunnel removed from RHCOS"
+
+        if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to uninstall stunnel from RHCOS."
+            exit 1
+        fi
+
+        echo ""
+        echo "stunnel removal scheduled."
+        echo "Reboot required to finalize removal:"
+        echo "    systemctl reboot"
+        echo ""
+
+        exit 0
     fi
-    ;;    
+    ;;
     suse|sles)
         if [ "$ACTION" == "$INSTALL" ]; then
             install_stunnel_suse
