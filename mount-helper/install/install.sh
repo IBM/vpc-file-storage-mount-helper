@@ -790,7 +790,10 @@ elif is_linux LINUX_RHCOS; then
         exit $?
     fi
 
-    exit_err "Only --stunnel flow supported on RHCOS in this version"
+    echo "RHCOS supports only regional (stunnel) EiT flow."
+    echo "Run:"
+    echo "   ./install.sh --stunnel"
+    exit 0
 fi;
 
 

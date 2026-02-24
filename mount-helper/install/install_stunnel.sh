@@ -240,18 +240,38 @@ detect_and_handle() {
     if [ "$ACTION" == "$INSTALL" ]; then
         echo "Installing stunnel on RHCOS using rpm-ostree"
 
+        echo "Installing stunnel on RHCOS using rpm-ostree"
         rpm-ostree install -y --idempotent stunnel
-        rpm-ostree apply-live
 
-        setup_stunnel_directories
-        create_stunnel_cert_if_installed
+        if [ $? -ne 0 ]; then
+            echo "Failed to install stunnel on RHCOS."
+            exit 1
+        fi
 
-        store_trusted_ca_file_name "/etc/pki/tls/certs/ca-bundle.crt"
-        store_stunnel_env
-        store_arch_env
+        echo ""
+        echo "=================================================="
+        echo "RHCOS detected."
+        echo "A reboot is REQUIRED to activate stunnel."
+        echo "Please reboot worker node manually:"
+        echo "    systemctl reboot"
+        echo "=================================================="
+        echo ""
+
+        # NOTE:
+        # Runtime configuration will be completed after reboot
+        # since rpm-ostree installs packages in next deployment.
 
         if command -v stunnel > /dev/null; then
             echo "stunnel installed successfully on RHCOS!"
+            echo ""
+            echo "=================================================="
+            echo "Reboot is required to activate rpm-ostree changes."
+            echo "Please reboot worker node manually:"
+            echo ""
+            echo "    sudo systemctl reboot"
+            echo ""
+            echo "After reboot, rerun mount command."
+            echo "=================================================="
         else
             echo "Failed to install stunnel on RHCOS."
             exit 1
