@@ -1024,6 +1024,19 @@ fi;
 
 if is_linux LINUX_FEDORA; then
     echo "Locked down distro not supported"
+elif is_linux LINUX_RED_HAT_COREOS; then
+    echo "RHCOS detected"
+
+    # Only stunnel flow supported here.
+    # Core lifecycle (packages + certs) already handled
+    # by existing RHCOS implementation.
+
+    if [[ "$STUNNEL_ENABLED" == "true" ]]; then
+        ./install_stunnel.sh install
+        exit $?
+    fi
+
+    exit_err "Only --stunnel flow supported on RHCOS in this version"
 fi;
 
 exit_err "IbmMountHelper Install not supported $NAME $VERSION"

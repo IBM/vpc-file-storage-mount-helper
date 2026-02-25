@@ -214,7 +214,14 @@ detect_and_handle() {
     # Source the OS release file
     . /etc/os-release
 
-    case "$ID" in
+    # Detect RHCOS properly
+    if [[ "$ID" == "rhcos" ]] || [[ "$VARIANT" == *"coreos"* ]]; then
+        OS_TYPE="rhcos"
+    else
+        OS_TYPE="$ID"
+    fi
+
+    case "$OS_TYPE" in
     ubuntu|debian)
         if [ "$ACTION" == "$INSTALL" ]; then
             install_stunnel_ubuntu_debian
@@ -229,6 +236,55 @@ detect_and_handle() {
             uninstall_stunnel_rhel_centos_rocky
         fi
         ;;
+    rhcos)
+        if [ "$ACTION" == "$INSTALL" ]; then
+            echo "Installing stunnel on RHCOS (offline rpm-ostree mode)"
+
+            PACKAGE_DIR="packages/rhel/$VERSION"
+
+            if [ ! -d "$PACKAGE_DIR" ]; then
+                echo "Offline package directory not found: $PACKAGE_DIR"
+                exit 1
+            fi
+
+            echo "Installing stunnel RPM from offline bundle..."
+
+            rpm-ostree install -y --idempotent "$PACKAGE_DIR"/stunnel*.rpm
+
+            if [ $? -ne 0 ]; then
+                echo "Failed to install stunnel on RHCOS."
+                exit 1
+            fi
+
+            echo ""
+            echo "=================================================="
+            echo "RHCOS detected."
+            echo "stunnel installed successfully."
+            echo ""
+            echo "A reboot is REQUIRED to activate rpm-ostree changes."
+            echo ""
+            echo "Please reboot worker node manually:"
+            echo ""
+            echo "    systemctl reboot"
+            echo ""
+            echo "After reboot:"
+            echo "  • load-cert.service (already installed)"
+            echo "  • certificates auto-configured"
+            echo "  • stunnel ready for mount"
+            echo "=================================================="
+            echo ""
+
+            exit 0
+
+        elif [ "$ACTION" == "$UNINSTALL" ]; then
+            echo "Removing stunnel from RHCOS..."
+
+            rpm-ostree uninstall -y --idempotent stunnel
+
+            echo "stunnel removed. Reboot required."
+            exit 0
+        fi
+        ;;    
     suse|sles)
         if [ "$ACTION" == "$INSTALL" ]; then
             install_stunnel_suse
