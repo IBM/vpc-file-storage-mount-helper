@@ -5,6 +5,18 @@ INSTALL="install"
 UNINSTALL="uninstall"
 CONF_FILE=/etc/ibmshare/share.conf
 
+if [ ! -f "$CONF_FILE" ]; then
+    echo ""
+    echo "ERROR: share.conf not found."
+    echo "Mount helper not initialized yet."
+    echo ""
+    echo "If this is first install on RHCOS:"
+    echo "  1. Reboot node"
+    echo "  2. Run install.sh --stunnel again"
+    echo ""
+    exit 1
+fi
+
 # Temporary: Add a test certificate to /etc/stunnel if stunnel is installed
 # This is a non-production test certificate used only during development.
 # Once certificates signed by a trusted CA are adopted, this will be removed
@@ -215,7 +227,7 @@ detect_and_handle() {
     . /etc/os-release
 
     # Detect RHCOS properly
-    if [[ "$ID" == "rhcos" ]] || [[ "$VARIANT" == *"coreos"* ]]; then
+    if [[ "$ID" == "rhcos" ]] || [[ "$VARIANT_ID" == *"coreos"* ]]; then
         OS_TYPE="rhcos"
     else
         OS_TYPE="$ID"
@@ -237,54 +249,43 @@ detect_and_handle() {
         fi
         ;;
     rhcos)
-        if [ "$ACTION" == "$INSTALL" ]; then
-            echo "Installing stunnel on RHCOS (offline rpm-ostree mode)"
+    if [ "$ACTION" == "$INSTALL" ]; then
 
-            PACKAGE_DIR="packages/rhel/$VERSION"
+        echo "RHCOS offline-first installation path selected"
 
-            if [ ! -d "$PACKAGE_DIR" ]; then
-                echo "Offline package directory not found: $PACKAGE_DIR"
-                exit 1
-            fi
+        #
+        # Offline RPM installation ONLY
+        #
+        STUNNEL_RPM=$(ls ./packages/rhel/*/stunnel*.rpm 2>/dev/null | head -1)
 
-            echo "Installing stunnel RPM from offline bundle..."
-
-            rpm-ostree install -y --idempotent "$PACKAGE_DIR"/stunnel*.rpm
-
-            if [ $? -ne 0 ]; then
-                echo "Failed to install stunnel on RHCOS."
-                exit 1
-            fi
-
+        if [ -z "$STUNNEL_RPM" ]; then
             echo ""
-            echo "=================================================="
-            echo "RHCOS detected."
-            echo "stunnel installed successfully."
+            echo "ERROR: stunnel RPM not found."
+            echo "Offline installation required for RHCOS."
+            echo "Please ensure stunnel RPM exists under:"
+            echo "  ./packages/rhel/<version>/"
             echo ""
-            echo "A reboot is REQUIRED to activate rpm-ostree changes."
-            echo ""
-            echo "Please reboot worker node manually:"
-            echo ""
-            echo "    systemctl reboot"
-            echo ""
-            echo "After reboot:"
-            echo "  • load-cert.service (already installed)"
-            echo "  • certificates auto-configured"
-            echo "  • stunnel ready for mount"
-            echo "=================================================="
-            echo ""
-
-            exit 0
-
-        elif [ "$ACTION" == "$UNINSTALL" ]; then
-            echo "Removing stunnel from RHCOS..."
-
-            rpm-ostree uninstall -y --idempotent stunnel
-
-            echo "stunnel removed. Reboot required."
-            exit 0
+            exit 1
         fi
-        ;;    
+
+        echo "Installing stunnel from offline RPM:"
+        echo "  $STUNNEL_RPM"
+
+        rpm-ostree install -y --idempotent "$STUNNEL_RPM"
+
+        echo ""
+        echo "=================================================="
+        echo "stunnel installation staged successfully."
+        echo "Reboot REQUIRED to activate changes."
+        echo ""
+        echo "Run:"
+        echo "   systemctl reboot"
+        echo "=================================================="
+        echo ""
+
+        exit 0
+    fi
+    ;;
     suse|sles)
         if [ "$ACTION" == "$INSTALL" ]; then
             install_stunnel_suse

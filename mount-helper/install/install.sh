@@ -104,6 +104,11 @@ exit_ok () {
     exit 0
 }
 
+is_reboot_required () {
+    rpm-ostree status | grep -q "pending deployment"
+    return $?
+}
+
 check_linux_version () {
     MIN_VER=$1
     if [ "$MIN_VER" == "$NA" ]; then
@@ -804,18 +809,18 @@ init_mount_helper_for_rhcos () {
             done
     fi
      # Check if STUNNEL_ENABLED is set to true
-    if [ "$STUNNEL_ENABLED" == "true" ]; then
-        echo "STUNNEL is enabled. Installing stunnel..."
+    # if [ "$STUNNEL_ENABLED" == "true" ]; then
+    #     echo "STUNNEL is enabled. Installing stunnel..."
 
-        # Make sure the script exists
-        if [ -x "./install_stunnel.sh" ]; then
-            ./install_stunnel.sh install
-        else
-            echo "Error: install_stunnel.sh not found or not executable in current directory."
-            exit 1
-        fi
-    fi
-    exit_ok "Install completed ok"
+    #     # Make sure the script exists
+    #     if [ -x "./install_stunnel.sh" ]; then
+    #         ./install_stunnel.sh install
+    #     else
+    #         echo "Error: install_stunnel.sh not found or not executable in current directory."
+    #         exit 1
+    #     fi
+    # fi
+    return 0
 
 }
 
@@ -946,53 +951,83 @@ if is_linux LINUX_CENTOS; then
 fi;
 
 if is_linux LINUX_RED_HAT_COREOS; then
-    # Do not install packages if --cert option is passed, since it must be already installed 
-    if [[ "$INSTALL_ARG" != "--cert" && "$INSTALL_MOUNT_OPTION_ARG" != "--cert" ]];  then
+    echo "RHCOS detected"
 
-        check_python3_installed python3
+    check_python3_installed python3
 
-        if reject_ipsec
-        then
-            install_apps mount.ibmshare*.rpm && $STUNNEL_INSTALL_CMD
-            exit $?
-        fi
-
-        if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
-            # Define the path to the package list file based on the RHEL version
-            PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
-
-            # Check if the package list file exists
-            if [ ! -f "$PACKAGE_LIST_PATH" ]; then
-                exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
-            fi
-
-            # Read the package list from the file
-            packages=()
-            while IFS= read -r line; do
-                packages+=("$line")
-            done < "$PACKAGE_LIST_PATH"
-
-            # Install the packages in the defined order
-            install_apps "${packages[@]}" mount.ibmshare*.rpm
-            service_to_install_cert_and_restart_strongswan_service_for_rhcos
-            init_mount_helper_for_rhcos
-            exit_ok "Install packages completed ok"
-        
-        else
-            if [ "$INSTALL_ARG" != "--uninstall" ]; then
-                rpm-ostree install --idempotent -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
-            fi
-            install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
-            service_to_install_cert_and_restart_strongswan_service_for_rhcos
-            init_mount_helper_for_rhcos
-            exit_ok "Install packages completed ok"
-
-        fi
-    # if install_arg == "--cert": then call etup_strongswan_restart_service, since after reboot only strongswan package is available  
-    elif [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]];  then
-        setup_strongswan_restart_service
-        init_mount_helper_for_rhcos
+    #
+    # -------------------------------------------------
+    # Phase 1 — rpm-ostree pending reboot check
+    # -------------------------------------------------
+    #
+    if rpm-ostree status | grep -q "pending deployment"; then
+        echo ""
+        echo "=================================================="
+        echo "rpm-ostree changes detected."
+        echo "Reboot REQUIRED before continuing."
+        echo ""
+        echo "Run:"
+        echo "   systemctl reboot"
+        echo ""
+        echo "After reboot rerun:"
+        echo "   ./install.sh --stunnel"
+        echo "=================================================="
+        echo ""
+        exit 0
     fi
+
+    #
+    # -------------------------------------------------
+    # Package Installation (Idempotent)
+    # -------------------------------------------------
+    #
+    if reject_ipsec
+    then
+        install_apps mount.ibmshare*.rpm
+        exit $?
+    fi
+
+    if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
+
+        PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
+
+        if [ ! -f "$PACKAGE_LIST_PATH" ]; then
+            exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
+        fi
+
+        packages=()
+        while IFS= read -r line; do
+            packages+=("$line")
+        done < "$PACKAGE_LIST_PATH"
+
+        install_apps "${packages[@]}" mount.ibmshare*.rpm
+
+    else
+        rpm-ostree install --idempotent -y \
+            "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
+
+        install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
+    fi
+
+    #
+    # -------------------------------------------------
+    # Certificates + Config
+    # -------------------------------------------------
+    #
+    service_to_install_cert_and_restart_strongswan_service_for_rhcos
+    init_mount_helper_for_rhcos
+
+    #
+    # -------------------------------------------------
+    # STUNNEL (POST-REBOOT SAFE)
+    # -------------------------------------------------
+    #
+    if [[ "$STUNNEL_ENABLED" == "true" ]]; then
+        echo "Running stunnel setup..."
+        ./install_stunnel.sh install
+    fi
+
+    exit_ok "Install completed ok"
 fi;
 
 if is_linux LINUX_ROCKY; then
@@ -1024,19 +1059,6 @@ fi;
 
 if is_linux LINUX_FEDORA; then
     echo "Locked down distro not supported"
-elif is_linux LINUX_RED_HAT_COREOS; then
-    echo "RHCOS detected"
-
-    # Only stunnel flow supported here.
-    # Core lifecycle (packages + certs) already handled
-    # by existing RHCOS implementation.
-
-    if [[ "$STUNNEL_ENABLED" == "true" ]]; then
-        ./install_stunnel.sh install
-        exit $?
-    fi
-
-    exit_err "Only --stunnel flow supported on RHCOS in this version"
 fi;
 
 exit_err "IbmMountHelper Install not supported $NAME $VERSION"
