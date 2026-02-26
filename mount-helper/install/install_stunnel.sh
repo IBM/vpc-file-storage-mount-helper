@@ -254,17 +254,24 @@ detect_and_handle() {
         echo "RHCOS offline-first installation path selected"
 
         #
-        # Offline RPM installation ONLY
+        # -------------------------------------------------
+        # Idempotency Check (VERY IMPORTANT)
+        # -------------------------------------------------
         #
-        STUNNEL_RPM=$(ls ./packages/rhel/*/stunnel*.rpm 2>/dev/null | head -1)
+        if rpm -q stunnel >/dev/null 2>&1; then
+            echo "stunnel already installed. Skipping installation."
+            exit 0
+        fi
+
+        #
+        # Find offline RPM
+        #
+        STUNNEL_RPM=$(find ./packages/rhel -type f -name "stunnel*.rpm" | head -1)
 
         if [ -z "$STUNNEL_RPM" ]; then
             echo ""
             echo "ERROR: stunnel RPM not found."
             echo "Offline installation required for RHCOS."
-            echo "Please ensure stunnel RPM exists under:"
-            echo "  ./packages/rhel/<version>/"
-            echo ""
             exit 1
         fi
 
@@ -277,9 +284,6 @@ detect_and_handle() {
         echo "=================================================="
         echo "stunnel installation staged successfully."
         echo "Reboot REQUIRED to activate changes."
-        echo ""
-        echo "Run:"
-        echo "   systemctl reboot"
         echo "=================================================="
         echo ""
 

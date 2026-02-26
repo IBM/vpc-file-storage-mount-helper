@@ -808,18 +808,6 @@ init_mount_helper_for_rhcos () {
                 check_result "Problem installing ssl certs"
             done
     fi
-     # Check if STUNNEL_ENABLED is set to true
-    # if [ "$STUNNEL_ENABLED" == "true" ]; then
-    #     echo "STUNNEL is enabled. Installing stunnel..."
-
-    #     # Make sure the script exists
-    #     if [ -x "./install_stunnel.sh" ]; then
-    #         ./install_stunnel.sh install
-    #     else
-    #         echo "Error: install_stunnel.sh not found or not executable in current directory."
-    #         exit 1
-    #     fi
-    # fi
     return 0
 
 }
