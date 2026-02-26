@@ -112,7 +112,18 @@ install_stunnel_rhel_centos_rocky() {
     echo "Offline stunnel install (RHEL/Rocky/CentOS)…"
     . /etc/os-release
 
-    local PKG_DIR="${PACKAGES_BASE}/rhel/${VERSION_ID}"
+    local OS_DIR="$ID"
+
+    # Special handling for CentOS Stream naming
+    if [[ "$ID" == "centos" && "$NAME" == *"Stream"* ]]; then
+        OS_DIR="centos_stream"
+    fi
+
+    local PKG_DIR="${PACKAGES_BASE}/${OS_DIR}/${VERSION_ID}"
+    if [ ! -d "$PKG_DIR" ]; then
+        echo "Offline package directory not found: $PKG_DIR"
+        exit 1
+    fi
 
     echo "Installing from: ${PKG_DIR}/stunnel*.rpm"
     if command -v dnf >/dev/null 2>&1; then
