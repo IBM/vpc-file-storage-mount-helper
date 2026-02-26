@@ -957,10 +957,6 @@ if is_linux LINUX_RED_HAT_COREOS; then
         echo "Run:"
         echo "   systemctl reboot"
         echo ""
-        echo "After reboot rerun:"
-        echo "   ./install.sh --stunnel"
-        echo "=================================================="
-        echo ""
         exit 0
     fi
 
