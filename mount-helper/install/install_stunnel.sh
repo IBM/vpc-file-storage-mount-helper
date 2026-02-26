@@ -3,7 +3,7 @@ set -euo pipefail
 
 INSTALL="install"
 UNINSTALL="uninstall"
-CONF_FILE=/etc/ibmcloud/share.conf
+CONF_FILE=/etc/ibmshare/share.conf
 
 # Base path: packages folder sits next to this script
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"

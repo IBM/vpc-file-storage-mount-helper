@@ -8,7 +8,7 @@
 INSTALL_ARG="$1"
 INSTALL_MOUNT_OPTION_ARG="$2"
 STUNNEL_ENABLED=false
-CONF_FILE=/etc/ibmcloud/share.conf
+CONF_FILE=/etc/ibmshare/share.conf
 
 APP_NAME="IBM Mount Share Helper"
 SCRIPT_NAME="mount.ibmshare"
@@ -18,12 +18,13 @@ MIN_STRONGSWAN_VERSION=5.4
 NA="NOT_SUPPORTED"
 APT="apt-get -y install"
 YUM="yum install -y"
+OSTREE="rpm-ostree install -y"
 ZYP="zypper install -y"
 LINUX_INSTALL_APP=""
 INSTALL_APP="Unknown"
 NAME=$(grep -oP '(?<=^NAME=).+' /etc/os-release | tr -d '"')
 VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
-ARCH="uname -m"
+ARCH="$(uname -m)"
 MAJOR_VERSION=${VERSION%.*}
 INSTALLED_PACKAGE_LIST="/etc/pre_installed_packages.txt"
 DOWNLOADED_RHEL_PACKAGE_PATH="packages/rhel/$VERSION"
@@ -35,6 +36,7 @@ LINUX_CENTOS=("CentOS Stream"     "9"            "$YUM")
 LINUX_ROCKY=("Rocky Linux"       "8"            "$YUM")
 LINUX_FEDORA=("Fedora Linux"     $NA            $NA)
 LINUX_SUSE=("SLES"               "12"           "$ZYP")
+LINUX_RED_HAT_COREOS=("Red Hat Enterprise Linux CoreOS" "4" "$OSTREE")
 LINUX_RED_HAT=("Red Hat Enterprise Linux" "7" "$YUM")
 
 declare -A region_map=(
@@ -174,8 +176,8 @@ is_linux () {
     eval 'ARRAY=( "${'"$1"'[@]}" )'
     local _NAME=${ARRAY[0]}
     local _MIN_VER=${ARRAY[1]}
-
-    if [[ "$NAME" == "$_NAME"* ]]; then
+    
+    if [[ "$NAME" == "$_NAME" ]]; then
         check_linux_version $_MIN_VER
         log "Linux version supported - $NAME ($VERSION)"
         set_install_app "${ARRAY[2]}"
@@ -262,6 +264,22 @@ _remove_apps() {
             else
                 rpm -e --allmatches --nodeps "$app"
             fi
+        elif ( is_linux LINUX_RED_HAT_COREOS ); then
+            if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
+                # Skip uninstallation in case /etc/pre_installed_packages.txt is missing in system
+                if [ ! -f "$INSTALLED_PACKAGE_LIST" ]; then
+                    log "Skipping uninstallation of packages as file '$INSTALLED_PACKAGE_LIST' is missing..."
+                    exit -1
+                fi
+                # Read preInstalled packages from system
+                if grep -q "^$app" $INSTALLED_PACKAGE_LIST ; then
+                    log "Skipping package $app for uninstallation as it was pre-installed on the system"
+                    continue 3
+                fi
+                rpm-ostree uninstall -y --idempotent "$app"
+            else
+                rpm-ostree uninstall -y --idempotent "$app"
+            fi
         else
             if [ "$INSTALL_APP" == "apt-get" ]; then
                 apt-get purge -y --auto-remove "$app"
@@ -287,6 +305,8 @@ check_available_version() {
         cmd="apt show  "$app"  2>/dev/null  | grep -i \"Version:\""
     elif [ "$INSTALL_APP" == "zypper" ]; then
         cmd="zypper info "$app" | grep \"Version\""
+    elif [ "$INSTALL_APP" == "rpm-ostree" ]; then
+        cmd=rpm -q --qf "%{VERSION}\n" "$app"
     else
         cmd="yum info "$app" | grep -i version"
     fi
@@ -321,17 +341,32 @@ setup_strongswan_restart_service() {
 
     # Check if systemd and systemctl is available
     if [ "$(ps -p 1 -o comm=)" = "systemd" ] && systemctl > /dev/null 2>&1; then
-        # Create the systemd service unit file
-        echo "$SERVICE_UNIT_CONTENT" | sudo tee /etc/systemd/system/restart-strongswan.service
+        # For RHCOS, skipping sudo
+        if is_linux LINUX_RED_HAT_COREOS; then
 
-        # Reload systemd configuration
-        sudo systemctl daemon-reload
+            # Create the systemd service unit file
+            echo "$SERVICE_UNIT_CONTENT" > /etc/systemd/system/restart-strongswan.service
 
-        # Enable and start the service
-        sudo systemctl enable restart-strongswan.service
-        sudo systemctl start restart-strongswan.service
+            # Reload systemd configuration
+            systemctl daemon-reload
 
+            # Enable and start the service
+            systemctl enable restart-strongswan.service
+            systemctl start restart-strongswan.service
+        # For all other operating systems
+        else
+            # Create the systemd service unit file
+            echo "$SERVICE_UNIT_CONTENT" | sudo tee /etc/systemd/system/restart-strongswan.service
+
+            # Reload systemd configuration
+            sudo systemctl daemon-reload
+
+            # Enable and start the service
+            sudo systemctl enable restart-strongswan.service
+            sudo systemctl start restart-strongswan.service
+        fi
         echo "StrongSwan restart service installed and enabled via systemd."
+
     fi
 }
 
@@ -339,22 +374,62 @@ remove_strongswan_restart_service() {
 
     # Check if systemd is available
     if [ "$(ps -p 1 -o comm=)" = "systemd" ] && systemctl > /dev/null 2>&1; then
-        # Stop the service if it is running
-        sudo systemctl stop restart-strongswan.service
 
-        # Disable the service
-        sudo systemctl disable restart-strongswan.service
+        # For RHCOS, skipping sudo
+        if is_linux LINUX_RED_HAT_COREOS; then
+            # Stop the service if it is running
+            systemctl stop restart-strongswan.service
 
-        # Remove the service unit file
-        sudo rm /etc/systemd/system/restart-strongswan.service
+            # Disable the service
+            systemctl disable restart-strongswan.service
 
-        # Reload systemd configuration
-        sudo systemctl daemon-reload
+            # Remove the service unit file
+            rm /etc/systemd/system/restart-strongswan.service
 
+            # Reload systemd configuration
+            systemctl daemon-reload
+        # For all other operating systems
+        else
+            # Stop the service if it is running
+            sudo systemctl stop restart-strongswan.service
+
+            # Disable the service
+            sudo systemctl disable restart-strongswan.service
+
+            # Remove the service unit file
+            sudo rm /etc/systemd/system/restart-strongswan.service
+
+            # Reload systemd configuration
+            sudo systemctl daemon-reload
+        fi
         echo "StrongSwan restart service removed."
     fi
 }
 
+remove_load_cert_service() {
+
+    # Check if systemd is available
+    if [ "$(ps -p 1 -o comm=)" = "systemd" ] && systemctl > /dev/null 2>&1; then
+
+        if is_linux LINUX_RED_HAT_COREOS; then
+            # Stop the service if it is running
+            systemctl stop load-cert.service
+
+            # Disable the service
+            systemctl disable load-cert.service
+
+            # Remove the service unit file
+            rm /etc/systemd/system/load-cert.service
+
+            # Remove the load-cert.done file
+            rm -f "/var/lib/load-cert.done"
+
+            # Reload systemd configuration
+            systemctl daemon-reload
+        fi
+        echo "Load Cert service removed."
+    fi
+}
 
 _install_app() {
     PACKAGE_NAME=$1
@@ -365,6 +440,8 @@ _install_app() {
             eval "yum install -y $PACKAGE_NAME --nogpgcheck"
         elif [ "$LINUX_INSTALL_APP" == "$APT" ]; then
             eval "apt-get --allow-unauthenticated -y install $PACKAGE_NAME"
+        elif [ "$LINUX_INSTALL_APP" == "$OSTREE" ]; then
+            eval "rpm-ostree -y --idempotent install $PACKAGE_NAME"
         elif [ "$LINUX_INSTALL_APP" == "$ZYP" ]; then
             eval "zypper --no-gpg-checks install -y $PACKAGE_NAME"
         fi
@@ -380,6 +457,8 @@ _install_app() {
         eval "apt-get install --only-upgrade -y $PACKAGE_NAME"
     elif [ "$LINUX_INSTALL_APP" == "$ZYP" ]; then
         eval "zypper update -y $(basename $PACKAGE_NAME .rpm)"
+     elif [ "$LINUX_INSTALL_APP" == "$OSTREE" ]; then
+        eval "rpm-ostree upgrade $PACKAGE_NAME"
     fi
 }
 
@@ -390,7 +469,7 @@ _install_apps() {
         # Storing all the packages which come by default on the system. This will be used in uninstalltion case.
         dpkg -l | grep '^ii' | awk '{print $2}' > $INSTALLED_PACKAGE_LIST
 
-    elif ( is_linux LINUX_RED_HAT || is_linux LINUX_CENTOS ) && [[ "$INSTALL_ARG" != "--update" && "$INSTALL_ARG" != "--update-stage" ]]; then
+    elif ( is_linux LINUX_RED_HAT || is_linux LINUX_CENTOS || is_linux LINUX_RED_HAT_COREOS ) && [[ "$INSTALL_ARG" != "--update" && "$INSTALL_ARG" != "--update-stage" ]]; then
         rpm -qa --queryformat '%{NAME}\n' > $INSTALLED_PACKAGE_LIST
 
     fi
@@ -399,7 +478,7 @@ _install_apps() {
         if [[ (( "$INSTALL_ARG" == "--update" || "$INSTALL_ARG" == "--update-stage" )) && $app != "mount.ibmshare"* ]]; then
             continue
         fi
-        if grep -q -i "strongswan" <<< "$app" && ! is_linux LINUX_UBUNTU && ! is_linux LINUX_RED_HAT; then
+        if grep -q -i "strongswan" <<< "$app" && ! is_linux LINUX_UBUNTU && ! is_linux LINUX_RED_HAT && ! is_linux LINUX_RED_HAT_COREOS; then
             check_available_version "$app" $MIN_STRONGSWAN_VERSION
         fi
 
@@ -475,6 +554,27 @@ _install_apps() {
                 continue
             fi
             _install_app "$app"
+        elif  is_linux LINUX_RED_HAT_COREOS && ([[ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]]); then
+            # Read preInstalled packages from system
+            if [[ $app != *"python"* && $(grep -q "^$app" $INSTALLED_PACKAGE_LIST; echo $?) -eq 0 ]] ; then
+                log "Skipping package $app for installation as it is pre-installed on the system"
+                continue
+            fi
+            log "Installing package $app"
+            if [[ $app == mount.ibmshare* ]]; then
+                if [[ "$INSTALL_ARG" == "--update" || "$INSTALL_ARG" == "--update-stage" ]]; then
+                    rpm-ostree upgrade "$app" 
+                else
+                    rpm-ostree install -y --idempotent "$app" 
+                fi
+            continue
+            fi
+            if [[ $app == *"python"* ]]; then
+                rpm-ostree install -y --idempotent "$app" 
+                continue
+            fi
+            PACKAGE_DIR="packages/rhel/$VERSION"
+            rpm-ostree install -y --idempotent "$PACKAGE_DIR/$app"* 
         else
             _install_app "$app"
         fi
@@ -488,6 +588,9 @@ install_apps() {
         reject_ipsec ||  remove_strongswan_restart_service
         if is_linux LINUX_SUSE; then
            reject_ipsec ||  sudo systemctl unmask strongswan.service
+        fi
+        if is_linux LINUX_RED_HAT_COREOS; then
+            remove_load_cert_service
         fi
         # Check if stunnel is installed
         if command -v stunnel >/dev/null 2>&1; then
@@ -518,14 +621,14 @@ wait_till_true () {
 check_python3_installed () {
     if ! reject_ipsec
     then
-    	if command_exist cloud-init; then
-        	log "Wait for cloud-init to complete."
-        	cloud-init status --wait --long
-    	fi
+        if command_exist cloud-init; then
+            log "Wait for cloud-init to complete."
+            cloud-init status --wait --long
+        fi
     fi
 
-    # ---------- RHEL OFFLINE PATH ----------
-    if is_linux LINUX_RED_HAT; then
+    # ---------- RHEL / RHEL COREOS ----------
+    if is_linux LINUX_RED_HAT || is_linux LINUX_RED_HAT_COREOS; then
         PYTHON_RPM_GLOB="packages/rhel/$VERSION/python*.rpm"
 
         if command_not_exist python3; then
@@ -544,13 +647,10 @@ check_python3_installed () {
         PYTHON3_PACKAGE="packages/ubuntu/$VERSION/python*.deb"
 
         if command_not_exist python3; then
-            if [ -z "$PYTHON3_PACKAGE" ]; then
-                exit_err "Python3 not installed"
-            fi
             _install_apps "$PYTHON3_PACKAGE"
         fi
 
-    # ---------- FALLBACK (OTHER DISTROS) ----------
+    # ---------- FALLBACK ----------
     else
         if command_not_exist python3; then
             if [ -z "$1" ]; then
@@ -559,10 +659,12 @@ check_python3_installed () {
             _install_apps "$1"
         fi
     fi
+
     PYTHON3_VERSION="$(get_current_python_version)"
     if version_less_than $PYTHON3_VERSION $MIN_PYTHON3_VERSION; then
-        exit_err  "Can only install with Python3 version $MIN_PYTHON3_VERSION or greater. Current version:$PYTHON3_VERSION"
-    fi;
+        exit_err "Can only install with Python3 version $MIN_PYTHON3_VERSION or greater. Current version:$PYTHON3_VERSION"
+    fi
+
     log "Python $PYTHON3_VERSION installed"
 }
 
@@ -620,11 +722,53 @@ touch_conf_file() {
 }
 
 setup_share_config() {
-    DIR_NAME="/etc/ibmcloud"
+    DIR_NAME="/etc/ibmshare"
 
     sudo mkdir -p $DIR_NAME
     sudo chmod 744 $DIR_NAME
     touch_conf_file
+}
+
+service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
+
+    # Create copy of script in local binary directory
+    cp /root/install.sh /usr/local/bin/install-service.sh
+    # Make sure it's executable
+    chmod +x /usr/local/bin/install-service.sh
+    # Reset the SELinux label to the default for that directory
+    restorecon -v /usr/local/bin/install-service.sh
+
+
+    # Define the systemd service unit content
+    SERVICE_UNIT_CONTENT="[Unit]
+    Description=Restart StrongSwan service and load the cert using same install.sh script
+    After=network.target multi-user.target
+    ConditionPathExists=!/var/lib/load-cert.done
+
+    [Service]
+    Type=oneshot
+    WorkingDirectory=/root
+    ExecStart=/usr/local/bin/install-service.sh --cert 
+    ExecStartPost=/usr/bin/touch /var/lib/load-cert.done
+    RemainAfterExit=true
+
+    [Install]
+    WantedBy=multi-user.target
+    "
+
+    # Check if systemd and systemctl is available
+    if [ "$(ps -p 1 -o comm=)" = "systemd" ] && systemctl > /dev/null 2>&1; then
+        # For RHCOS, skipping sudo
+        if is_linux LINUX_RED_HAT_COREOS; then
+
+            # Create the systemd service unit file
+            echo "$SERVICE_UNIT_CONTENT" > /etc/systemd/system/load-cert.service
+            # Reload systemd configuration
+            systemctl daemon-reload
+            # Enable the service
+            systemctl enable load-cert.service
+        fi
+    fi
 }
 
 init_mount_helper () {
@@ -699,6 +843,56 @@ init_mount_helper () {
         fi
     fi
     exit_ok "Install completed ok"
+}
+init_mount_helper_for_rhcos () {
+    if [[ "$INSTALL_ARG" == "region="* ]]; then
+        region_code="${INSTALL_ARG#region=}"
+        mapped_region="${region_map[$region_code]}"
+        if [ -n "$mapped_region" ]; then
+            log "Updating config file: $CONF_FILE"
+            sed -i "s/region=.*/region=$mapped_region/" $CONF_FILE
+        else
+            exit_err "Error: Invalid region code '$region_code'"
+        fi
+        INSTALL_ARG=""
+    fi
+
+    if [[ "$INSTALL_MOUNT_OPTION_ARG" == "stage" ]]; then
+        exit_err "incorrect command, pass stage as first arg."
+    fi
+    if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
+        check_tls_supported_linux_verion
+    fi
+    if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]]; then
+
+            for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
+
+                ENV_NAME="${entry%%|*}"
+                CERT_PATH="${entry##*|}"
+
+                if [ ! -d "$CERT_PATH" ]; then
+                    exit_err "$CERT_PATH cert folder does not exist"
+                fi
+
+                log "Installing certs for $ENV_NAME environment..."
+                $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
+                check_result "Problem installing ssl certs"
+            done
+    fi
+     # Check if STUNNEL_ENABLED is set to true
+    if [ "$STUNNEL_ENABLED" == "true" ]; then
+        echo "STUNNEL is enabled. Installing stunnel..."
+
+        # Make sure the script exists
+        if [ -x "./install_stunnel.sh" ]; then
+            ./install_stunnel.sh install
+        else
+            echo "Error: install_stunnel.sh not found or not executable in current directory."
+            exit 1
+        fi
+    fi
+    exit_ok "Install completed ok"
+
 }
 
 # main starts here.
@@ -825,6 +1019,56 @@ if is_linux LINUX_CENTOS; then
     init_mount_helper
 fi;
 
+if is_linux LINUX_RED_HAT_COREOS; then
+    # Do not install packages if --cert option is passed, since it must be already installed 
+    if [[ "$INSTALL_ARG" != "--cert" && "$INSTALL_MOUNT_OPTION_ARG" != "--cert" ]];  then
+
+        check_python3_installed python3
+
+        if reject_ipsec
+        then
+            install_apps mount.ibmshare*.rpm && $STUNNEL_INSTALL_CMD
+            exit $?
+        fi
+
+        if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
+            # Define the path to the package list file based on the RHEL version
+            PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
+
+            # Check if the package list file exists
+            if [ ! -f "$PACKAGE_LIST_PATH" ]; then
+                exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
+            fi
+
+            # Read the package list from the file
+            packages=()
+            while IFS= read -r line; do
+                packages+=("$line")
+            done < "$PACKAGE_LIST_PATH"
+
+            # Install the packages in the defined order
+            install_apps "${packages[@]}" mount.ibmshare*.rpm
+            service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            init_mount_helper_for_rhcos
+            exit_ok "Install packages completed ok"
+        
+        else
+            if [ "$INSTALL_ARG" != "--uninstall" ]; then
+                rpm-ostree install --idempotent -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
+            fi
+            install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
+            service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            init_mount_helper_for_rhcos
+            exit_ok "Install packages completed ok"
+
+        fi
+    # if install_arg == "--cert": then call etup_strongswan_restart_service, since after reboot only strongswan package is available  
+    elif [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]];  then
+        setup_strongswan_restart_service
+        init_mount_helper_for_rhcos
+    fi
+fi;
+
 if is_linux LINUX_ROCKY; then
     check_python3_installed python39
     if reject_ipsec
@@ -855,6 +1099,5 @@ fi;
 if is_linux LINUX_FEDORA; then
     echo "Locked down distro not supported"
 fi;
-
 
 exit_err "IbmMountHelper Install not supported $NAME $VERSION"
