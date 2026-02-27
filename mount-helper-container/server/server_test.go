@@ -54,13 +54,26 @@ func TestMainFunction(t *testing.T) {
 }
 
 func TestHandleMounting(t *testing.T) {
-	sysOp := &MockSystemOperation{}
+	gin.SetMode(gin.TestMode)
 
-	// Positive Test Case
+	// Positive test case
 	t.Run("Valid Request ipsec", func(t *testing.T) {
-		jsonBody := `{"mountPath": "/source", "targetPath": "/target", "fsType": "ibmshare", "transitEncryption": "ipsec", "requestID": "123"}`
-		req, err := http.NewRequest("POST", "/api/mount", strings.NewReader(jsonBody))
-		assert.NoError(t, err)
+		sysOp := &MockSystemOperation{
+			ExecuteFunc: func(command string, args ...string) (string, error) {
+				return "mounted", nil
+			},
+		}
+
+		jsonBody := `{
+			"mountPath": "/source",
+			"targetPath": "/target",
+			"fsType": "ibmshare",
+			"transitEncryption": "` + TransitEncryptionIPSec + `",
+			"requestID": "123"
+		}`
+
+		req := httptest.NewRequest(http.MethodPost, "/api/mount", strings.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -71,9 +84,22 @@ func TestHandleMounting(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 	t.Run("Valid Request stunnel", func(t *testing.T) {
-		jsonBody := `{"mountPath": "/source", "targetPath": "/target", "fsType": "ibmshare", "transitEncryption": "stunnel", "requestID": "123"}`
-		req, err := http.NewRequest("POST", "/api/mount", strings.NewReader(jsonBody))
-		assert.NoError(t, err)
+		sysOp := &MockSystemOperation{
+			ExecuteFunc: func(command string, args ...string) (string, error) {
+				return "mounted", nil
+			},
+		}
+
+		jsonBody := `{
+			"mountPath": "/source",
+			"targetPath": "/target",
+			"fsType": "ibmshare",
+			"transitEncryption": "` + TransitEncryptionStunnel + `",
+			"requestID": "123"
+		}`
+
+		req := httptest.NewRequest(http.MethodPost, "/api/mount", strings.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -84,10 +110,20 @@ func TestHandleMounting(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
+	// Negative test case
 	t.Run("Invalid transit encryption value", func(t *testing.T) {
-		jsonBody := `{"mountPath": "/source", "targetPath": "/target", "fsType": "ibmshare", "transitEncryption": "abc", "requestID": "123"}`
-		req, err := http.NewRequest("POST", "/api/mount", strings.NewReader(jsonBody))
-		assert.NoError(t, err)
+		sysOp := &MockSystemOperation{}
+
+		jsonBody := `{
+			"mountPath": "/source",
+			"targetPath": "/target",
+			"fsType": "ibmshare",
+			"transitEncryption": "abc",
+			"requestID": "123"
+		}`
+
+		req := httptest.NewRequest(http.MethodPost, "/api/mount", strings.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -97,11 +133,11 @@ func TestHandleMounting(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
+	t.Run("Invalid JSON", func(t *testing.T) {
+		sysOp := &MockSystemOperation{}
 
-	// Invalid Request
-	t.Run("Invalid Request", func(t *testing.T) {
-		req, err := http.NewRequest("POST", "/api/mount", strings.NewReader("invalid JSON"))
-		assert.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/api/mount", strings.NewReader("invalid JSON"))
+		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -111,16 +147,23 @@ func TestHandleMounting(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
-
-	// Mounting Failure
 	t.Run("Mounting Failure", func(t *testing.T) {
-		sysOp.ExecuteFunc = func(command string, args ...string) (string, error) {
-			return "", errors.New("mounting failed")
+		sysOp := &MockSystemOperation{
+			ExecuteFunc: func(command string, args ...string) (string, error) {
+				return "", errors.New("mounting failed")
+			},
 		}
 
-		jsonBody := `{"mountPath": "/source", "targetPath": "/target", "fsType": "ibmshare", "transitEncryption": "ipsec",  "requestID": "123"}`
-		req, err := http.NewRequest("POST", "/api/mount", strings.NewReader(jsonBody))
-		assert.NoError(t, err)
+		jsonBody := `{
+			"mountPath": "/source",
+			"targetPath": "/target",
+			"fsType": "ibmshare",
+			"transitEncryption": "` + TransitEncryptionIPSec + `",
+			"requestID": "123"
+		}`
+
+		req := httptest.NewRequest(http.MethodPost, "/api/mount", strings.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)

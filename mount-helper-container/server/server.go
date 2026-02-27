@@ -44,6 +44,11 @@ var (
 	socketPath = socketDir + "ibmshare.sock"
 )
 
+const (
+	TransitEncryptionIPSec   = "ipsec"
+	TransitEncryptionStunnel = "stunnel"
+)
+
 // SystemOperation is an interface for system operations like mount and unmount.
 type SystemOperation interface {
 	Execute(command string, args ...string) (string, error)
@@ -139,40 +144,35 @@ func handleMounting(sysOp SystemOperation) gin.HandlerFunc {
 			return
 		}
 
-		logger.Info("New mount request with values: ", zap.String("RequestID:", request.RequestID), zap.String("Source mount Path:", request.MountPath), zap.String("Target Path:", request.TargetPath))
+		logger.Info("New mount request", zap.String("requestID", request.RequestID), zap.String("sourceMountPath", request.MountPath), zap.String("targetPath", request.TargetPath))
 
-		// Form mount command options on basis of transit encryption value
-		var output string
-		var err error
+		var mountOption string
+
 		switch request.TransitEncryption {
-		case "ipsec":
-			logger.Info("Transit encryption is set to ipsec, using ipsec options for mounting.")
-			command := "mount -t " + request.FsType + " -o secure=true " + request.MountPath + " " + request.TargetPath + " -v"
-			logger.Info("Command to execute is: ", zap.String("Command:", command))
-			output, err = sysOp.Execute("mount", "-t", request.FsType, "-o", "secure=true", request.MountPath, request.TargetPath, "-v")
-		case "stunnel":
-			logger.Info("Transit encryption is set to stunnel, using stunnel options for mounting.")
-			command := "mount -t " + request.FsType + " -o stunnel " + request.MountPath + " " + request.TargetPath + " -v"
-			logger.Info("Command to execute is: ", zap.String("Command:", command))
-			output, err = sysOp.Execute("mount", "-t", request.FsType, "-o", "stunnel", request.MountPath, request.TargetPath, "-v")
+		case TransitEncryptionIPSec:
+			mountOption = "secure=true"
+		case TransitEncryptionStunnel:
+			mountOption = "stunnel"
 		default:
-			logger.Error("Invalid transit encryption value provided: ", zap.String("Transit Encryption:", request.TransitEncryption))
+			logger.Error("Invalid transit encryption value provided: ", zap.String("transitEncryption", request.TransitEncryption))
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid transit encryption value"})
 			return
 		}
 
+		logger.Info("Using transit encryption", zap.String("transitEncryption", request.TransitEncryption), zap.String("mountOption", mountOption))
+
+		output, err := sysOp.Execute("mount", "-t", request.FsType, "-o", mountOption, request.MountPath, request.TargetPath, "-v")
+
 		if err != nil {
-			logger.Error("Mounting failed with error: ", zap.Error(err))
-			logger.Error("Command output: ", zap.String("output", output))
-			response := gin.H{
+			logger.Error("Mounting failed", zap.Error(err), zap.String("output", output))
+			c.JSON(http.StatusInternalServerError, gin.H{
 				"MountExitCode": err.Error(),
 				"Description":   output,
-			}
-			c.JSON(http.StatusInternalServerError, response)
+			})
 			return
 		}
 
-		logger.Info("Command output: ", zap.String("", output))
+		logger.Info("Command output: ", zap.String("output", output))
 		c.JSON(http.StatusOK, gin.H{"message": "Request processed successfully"})
 	}
 }
