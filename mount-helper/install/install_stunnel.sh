@@ -1,6 +1,6 @@
 #!/bin/bash
+set -euo pipefail
 
-# Constants
 INSTALL="install"
 UNINSTALL="uninstall"
 CONF_FILE=/etc/ibmshare/share.conf
@@ -16,6 +16,9 @@ if [ ! -f "$CONF_FILE" ]; then
     echo ""
     exit 1
 fi
+# Base path: packages folder sits next to this script
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+PACKAGES_BASE="${SCRIPT_DIR}/packages"
 
 # Temporary: Add a test certificate to /etc/stunnel if stunnel is installed
 # This is a non-production test certificate used only during development.
@@ -63,90 +66,93 @@ EOF
     fi
 }
 
-store_stunnel_env() {
-local stunnel_env="STUNNEL_ENV"
-
-    # It is okay to store empty value.
-    local value="$STUNNEL_ENV"
-
-    sed -i.bak "/${stunnel_env}=/d"  "$CONF_FILE"
-
-    if  ! grep -q $stunnel_env $CONF_FILE
-    then
-        echo ${stunnel_env}="$value" >> $CONF_FILE
-    fi
-}
-
-store_trusted_ca_file_name() {
-local root_ca="TRUSTED_ROOT_CACERT"
-
-    sed -i.bak "/${root_ca}=/d" "$CONF_FILE"
-
-    if  ! grep -q $root_ca $CONF_FILE
-    then
-        echo ${root_ca}="$@" >> $CONF_FILE
-    fi
-}
-
-# Create necessary directories
 setup_stunnel_directories() {
-    DIR_LIST="/var/run/stunnel4/ /etc/stunnel /var/log/stunnel"
+    local DIR_LIST="/var/run/stunnel4/ /etc/stunnel /var/log/stunnel"
     sudo mkdir -p $DIR_LIST
     sudo chmod 744 $DIR_LIST
 }
 
-# Install stunnel on Ubuntu/Debian-based systems
-install_stunnel_ubuntu_debian() {
-    echo "Starting installation of stunnel on Ubuntu/Debian-based system..."
-    # Update apt and install stunnel
-    sudo apt-get update
-    sudo apt-get install -y stunnel4
-    setup_stunnel_directories
-    create_stunnel_cert_if_installed
+store_kv() {
+    local k="$1"
+    local v="$2"
+    sudo mkdir -p "$(dirname "$CONF_FILE")"
+    sudo touch "$CONF_FILE"
+    sudo sed -i.bak "/^${k}=*/d" "$CONF_FILE"
+    echo "${k}=${v}" | sudo tee -a "$CONF_FILE" >/dev/null
+}
 
-    store_trusted_ca_file_name "/etc/ssl/certs/ca-certificates.crt"
-    store_stunnel_env
-    store_arch_env
-    # Verify installation
-    if command -v stunnel > /dev/null; then
-        echo "stunnel installed successfully!"
-    else
-        echo "Failed to install stunnel."
-        exit 1
-    fi
+store_stunnel_env() {
+    store_kv STUNNEL_ENV "${STUNNEL_ENV:-}"
+}
+
+store_trusted_ca_file_name() {
+    store_kv TRUSTED_ROOT_CACERT "$*"
 }
 
 store_arch_env() {
-    local arch_env="ARCH_ENV"
+    store_kv ARCH_ENV "$(uname -m)"
+}
 
-    local value="$(uname -m)"
+# Install stunnel on ubuntu/debian systems
+install_stunnel_ubuntu_debian() {
+    echo "Offline stunnel install (Ubuntu/Debian)…"
+    . /etc/os-release
+    : "${VERSION_ID:?No VERSION_ID}"
 
-    sed -i.bak "/${arch_env}=/d"  "$CONF_FILE"
+    local PKG_DIR="${PACKAGES_BASE}/ubuntu/${VERSION_ID}"
 
-    if  ! grep -q $arch_env $CONF_FILE
-    then
-        echo ${arch_env}="$value" >> $CONF_FILE
+    echo "Installing from: ${PKG_DIR}/stunnel*.deb"
+    sudo apt-get -y install "$PKG_DIR"/stunnel*.deb
+
+    setup_stunnel_directories
+    create_stunnel_cert_if_installed
+    store_trusted_ca_file_name "/etc/ssl/certs/ca-certificates.crt"
+    store_stunnel_env
+    store_arch_env
+
+    if command -v stunnel >/dev/null 2>&1; then
+        echo "stunnel installed offline."
+    else
+        echo "install failed"
+        exit 1
     fi
 }
 
 # Install stunnel on Red Hat/CentOS/Rocky-based systems
 install_stunnel_rhel_centos_rocky() {
-    echo "Starting installation of stunnel on Red Hat/CentOS/Rocky-based system..."
+    echo "Offline stunnel install (RHEL/Rocky/CentOS)…"
+    . /etc/os-release
 
-    # Install stunnel
-    sudo yum install -y stunnel
+    local OS_DIR="$ID"
+
+    # Special handling for CentOS Stream naming
+    if [[ "$ID" == "centos" && "$NAME" == *"Stream"* ]]; then
+        OS_DIR="centos_stream"
+    fi
+
+    local PKG_DIR="${PACKAGES_BASE}/${OS_DIR}/${VERSION_ID}"
+    if [ ! -d "$PKG_DIR" ]; then
+        echo "Offline package directory not found: $PKG_DIR"
+        exit 1
+    fi
+
+    echo "Installing from: ${PKG_DIR}/stunnel*.rpm"
+    if command -v dnf >/dev/null 2>&1; then
+        sudo dnf -y install --disablerepo='*' --disableplugin='*' --setopt=install_weak_deps=False "$PKG_DIR"/stunnel*.rpm
+    else
+        sudo yum -y install --disablerepo='*' --disableplugin='*' --nogpgcheck "$PKG_DIR"/stunnel*.rpm
+    fi
+
     setup_stunnel_directories
     create_stunnel_cert_if_installed
-
     store_trusted_ca_file_name "/etc/pki/tls/certs/ca-bundle.crt"
     store_stunnel_env
     store_arch_env
 
-    # Verify installation
-    if command -v stunnel > /dev/null; then
-        echo "stunnel installed successfully!"
+    if command -v stunnel >/dev/null 2>&1; then
+        echo "stunnel installed offline."
     else
-        echo "Failed to install stunnel."
+        echo "install failed"
         exit 1
     fi
 }
@@ -156,10 +162,10 @@ install_stunnel_suse() {
     echo "Starting installation of stunnel on SUSE-based system..."
     # Install stunnel
     sudo zypper install -y stunnel
+
     setup_stunnel_directories
     create_stunnel_cert_if_installed
-
-    store_trusted_ca_file_name  "/etc/ssl/ca-bundle.pem"
+    store_trusted_ca_file_name "/etc/ssl/ca-bundle.pem"
     store_stunnel_env
 
     # Verify installation
@@ -173,30 +179,18 @@ install_stunnel_suse() {
 
 # Uninstall stunnel on Ubuntu/Debian-based systems
 uninstall_stunnel_ubuntu_debian() {
-    echo "Uninstalling stunnel on Ubuntu/Debian-based system..."
-    sudo apt-get remove --purge -y stunnel4
-    sudo rm -rf /var/run/stunnel4/ /etc/stunnel
-
-    if ! command -v stunnel > /dev/null; then
-        echo "stunnel uninstalled successfully!"
-    else
-        echo "Failed to uninstall stunnel."
-        exit 1
-    fi
+  echo "Uninstalling stunnel (Ubuntu/Debian)…"
+  sudo apt-get remove --purge -y stunnel4 || true
+  sudo rm -rf /var/run/stunnel4/ /etc/stunnel
+  command -v stunnel >/dev/null || echo "stunnel uninstalled."
 }
 
 # Uninstall stunnel on Red Hat/CentOS/Rocky-based systems
 uninstall_stunnel_rhel_centos_rocky() {
-    echo "Uninstalling stunnel on Red Hat/CentOS/Rocky-based system..."
-    sudo yum remove -y stunnel
-    sudo rm -rf /var/run/stunnel4/ /etc/stunnel
-
-    if ! command -v stunnel > /dev/null; then
-        echo "stunnel uninstalled successfully!"
-    else
-        echo "Failed to uninstall stunnel."
-        exit 1
-    fi
+  echo "Uninstalling stunnel (RHEL/Rocky/CentOS)…"
+  if command -v dnf >/dev/null 2>&1; then sudo dnf remove -y stunnel || true; else sudo yum remove -y stunnel || true; fi
+  sudo rm -rf /var/run/stunnel4/ /etc/stunnel
+  command -v stunnel >/dev/null || echo "stunnel uninstalled."
 }
 
 # Uninstall stunnel on SUSE-based systems
@@ -215,102 +209,95 @@ uninstall_stunnel_suse() {
 
 # Function to detect the OS and install or uninstall stunnel
 detect_and_handle() {
-    ACTION=$1
+    local ACTION="$1"
 
-    # Check if the OS release file exists
     if [ ! -f /etc/os-release ]; then
-        echo "The file /etc/os-release does not exist. Unable to detect OS."
+        echo "/etc/os-release missing"
         exit 1
     fi
 
-    # Source the OS release file
     . /etc/os-release
 
-    # Detect RHCOS properly
-    if [[ "$ID" == "rhcos" ]] || [[ "$VARIANT_ID" == *"coreos"* ]]; then
-        OS_TYPE="rhcos"
-    else
-        OS_TYPE="$ID"
-    fi
+# Detect RHCOS properly
+if [[ "$ID" == "rhcos" ]] || [[ "$VARIANT_ID" == *"coreos"* ]]; then
+    OS_TYPE="rhcos"
+else
+    OS_TYPE="$ID"
+fi
 
-    case "$OS_TYPE" in
+case "$OS_TYPE" in
     ubuntu|debian)
-        if [ "$ACTION" == "$INSTALL" ]; then
+        if [ "$ACTION" = "$INSTALL" ]; then
             install_stunnel_ubuntu_debian
-        elif [ "$ACTION" == "$UNINSTALL" ]; then
+        else
             uninstall_stunnel_ubuntu_debian
         fi
         ;;
     centos|rhel|rocky)
-        if [ "$ACTION" == "$INSTALL" ]; then
+        if [ "$ACTION" = "$INSTALL" ]; then
             install_stunnel_rhel_centos_rocky
-        elif [ "$ACTION" == "$UNINSTALL" ]; then
+        else
             uninstall_stunnel_rhel_centos_rocky
         fi
         ;;
     rhcos)
-    if [ "$ACTION" == "$INSTALL" ]; then
+        if [ "$ACTION" = "$INSTALL" ]; then
+            echo "RHCOS offline-first installation path selected"
 
-        echo "RHCOS offline-first installation path selected"
+            # Idempotency check
+            if rpm -q stunnel >/dev/null 2>&1; then
+                echo "stunnel already installed. Skipping installation."
+                exit 0
+            fi
 
-        #
-        # -------------------------------------------------
-        # Idempotency Check (VERY IMPORTANT)
-        # -------------------------------------------------
-        #
-        if rpm -q stunnel >/dev/null 2>&1; then
-            echo "stunnel already installed. Skipping installation."
+            # Find offline RPM using Sai's base path logic
+            STUNNEL_RPM=$(find "${PACKAGES_BASE}/rhel" -type f -name "stunnel*.rpm" | head -1)
+
+            if [ -z "$STUNNEL_RPM" ]; then
+                echo ""
+                echo "ERROR: stunnel RPM not found."
+                echo "Offline installation required for RHCOS."
+                exit 1
+            fi
+
+            echo "Installing stunnel from offline RPM:"
+            echo "  $STUNNEL_RPM"
+
+            rpm-ostree install -y --idempotent "$STUNNEL_RPM"
+
+            echo ""
+            echo "=================================================="
+            echo "stunnel installation staged successfully."
+            echo "Reboot REQUIRED to activate changes."
+            echo "=================================================="
+            echo ""
+
+            exit 0
+        else
+            echo "Uninstalling stunnel on RHCOS..."
+            rpm-ostree uninstall stunnel || true
             exit 0
         fi
-
-        #
-        # Find offline RPM
-        #
-        STUNNEL_RPM=$(find ./packages/rhel -type f -name "stunnel*.rpm" | head -1)
-
-        if [ -z "$STUNNEL_RPM" ]; then
-            echo ""
-            echo "ERROR: stunnel RPM not found."
-            echo "Offline installation required for RHCOS."
-            exit 1
-        fi
-
-        echo "Installing stunnel from offline RPM:"
-        echo "  $STUNNEL_RPM"
-
-        rpm-ostree install -y --idempotent "$STUNNEL_RPM"
-
-        echo ""
-        echo "=================================================="
-        echo "stunnel installation staged successfully."
-        echo "Reboot REQUIRED to activate changes."
-        echo "=================================================="
-        echo ""
-
-        exit 0
-    fi
-    ;;
+        ;;
     suse|sles)
-        if [ "$ACTION" == "$INSTALL" ]; then
+        if [ "$ACTION" = "$INSTALL" ]; then
             install_stunnel_suse
-        elif [ "$ACTION" == "$UNINSTALL" ]; then
+        else
             uninstall_stunnel_suse
         fi
-            ;;
-        *)
-            echo "Unsupported OS: $ID"
-            exit 1
-            ;;
-    esac
+        ;;
+    *)
+        echo "Unsupported OS: $ID"
+        exit 1
+        ;;
+esac
 }
 
 # Default action is install
-ACTION=$(echo "${1:-$INSTALL}" | tr '[:upper:]' '[:lower:]')
-
+ACTION="$(echo "${1:-$INSTALL}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$ACTION" != "$INSTALL" && "$ACTION" != "$UNINSTALL" ]]; then
-    echo "Invalid argument. Please specify 'install' or 'uninstall'."
+    echo "Use: install|uninstall"
     exit 1
 fi
 
-# Start the installation or uninstallation process
 detect_and_handle "$ACTION"
