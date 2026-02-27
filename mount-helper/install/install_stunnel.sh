@@ -5,6 +5,17 @@ INSTALL="install"
 UNINSTALL="uninstall"
 CONF_FILE=/etc/ibmshare/share.conf
 
+if [ ! -f "$CONF_FILE" ]; then
+    echo ""
+    echo "ERROR: share.conf not found."
+    echo "Mount helper not initialized yet."
+    echo ""
+    echo "If this is first install on RHCOS:"
+    echo "  1. Reboot node"
+    echo "  2. Run install.sh --stunnel again"
+    echo ""
+    exit 1
+fi
 # Base path: packages folder sits next to this script
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 PACKAGES_BASE="${SCRIPT_DIR}/packages"
@@ -207,33 +218,79 @@ detect_and_handle() {
 
     . /etc/os-release
 
-    case "$ID" in
-        ubuntu|debian)
-            if [ "$ACTION" = "$INSTALL" ]; then
-                install_stunnel_ubuntu_debian
-            else
-                uninstall_stunnel_ubuntu_debian
+# Detect RHCOS properly
+if [[ "$ID" == "rhcos" ]] || [[ "$VARIANT_ID" == *"coreos"* ]]; then
+    OS_TYPE="rhcos"
+else
+    OS_TYPE="$ID"
+fi
+
+case "$OS_TYPE" in
+    ubuntu|debian)
+        if [ "$ACTION" = "$INSTALL" ]; then
+            install_stunnel_ubuntu_debian
+        else
+            uninstall_stunnel_ubuntu_debian
+        fi
+        ;;
+    centos|rhel|rocky)
+        if [ "$ACTION" = "$INSTALL" ]; then
+            install_stunnel_rhel_centos_rocky
+        else
+            uninstall_stunnel_rhel_centos_rocky
+        fi
+        ;;
+    rhcos)
+        if [ "$ACTION" = "$INSTALL" ]; then
+            echo "RHCOS offline-first installation path selected"
+
+            # Idempotency check
+            if rpm -q stunnel >/dev/null 2>&1; then
+                echo "stunnel already installed. Skipping installation."
+                exit 0
             fi
-            ;;
-        centos|rhel|rocky)
-            if [ "$ACTION" = "$INSTALL" ]; then
-                install_stunnel_rhel_centos_rocky
-            else
-                uninstall_stunnel_rhel_centos_rocky
+
+            # Find offline RPM using Sai's base path logic
+            STUNNEL_RPM=$(find "${PACKAGES_BASE}/rhel" -type f -name "stunnel*.rpm" | head -1)
+
+            if [ -z "$STUNNEL_RPM" ]; then
+                echo ""
+                echo "ERROR: stunnel RPM not found."
+                echo "Offline installation required for RHCOS."
+                exit 1
             fi
-            ;;
-        suse|sles)
-            if [ "$ACTION" = "$INSTALL" ]; then
-                install_stunnel_suse
-            else
-                uninstall_stunnel_suse
-            fi
-            ;;
-        *)
-            echo "Unsupported OS: $ID"
-            exit 1
-            ;;
-    esac
+
+            echo "Installing stunnel from offline RPM:"
+            echo "  $STUNNEL_RPM"
+
+            rpm-ostree install -y --idempotent "$STUNNEL_RPM"
+
+            echo ""
+            echo "=================================================="
+            echo "stunnel installation staged successfully."
+            echo "Reboot REQUIRED to activate changes."
+            echo "=================================================="
+            echo ""
+
+            exit 0
+        else
+            echo "Uninstalling stunnel on RHCOS..."
+            rpm-ostree uninstall stunnel || true
+            exit 0
+        fi
+        ;;
+    suse|sles)
+        if [ "$ACTION" = "$INSTALL" ]; then
+            install_stunnel_suse
+        else
+            uninstall_stunnel_suse
+        fi
+        ;;
+    *)
+        echo "Unsupported OS: $ID"
+        exit 1
+        ;;
+esac
 }
 
 # Default action is install
