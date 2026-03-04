@@ -98,8 +98,8 @@ install_stunnel_ubuntu_debian() {
     echo "Offline stunnel install (Ubuntu/Debian)…"
     . /etc/os-release
     : "${VERSION_ID:?No VERSION_ID}"
-
-    local PKG_DIR="${PACKAGES_BASE}/ubuntu/${VERSION_ID}"
+    local OS_DIR="$ID"
+    local PKG_DIR="${PACKAGES_BASE}/${OS_DIR}/${VERSION_ID}"
 
     echo "Installing from: ${PKG_DIR}/stunnel*.deb"
     sudo apt-get -y install "$PKG_DIR"/stunnel*.deb
