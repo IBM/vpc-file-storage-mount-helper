@@ -18,7 +18,7 @@ export LINT_VERSION="1.43.0"
 GOPACKAGES=$(shell go list ./... | grep -v /vendor/ | grep -v /tests)
 
 NAME := mount-helper-container
-APP_VERSION := 0.1.3
+APP_VERSION := 0.1.4
 MAINTAINER := "IKS Storage"
 DESCRIPTION := "IBM Mount-helper-container service"
 LICENSE := "IBM"
@@ -38,10 +38,9 @@ deb-build:
 deb-build: build-linux
 	rm -rf $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/DEBIAN
-	mkdir -p ${BUILD_DIR}/etc/systemd/system/ ${BUILD_DIR}/usr/local/bin/ $(BUILD_DIR)/etc/ibmshare
+	mkdir -p ${BUILD_DIR}/etc/systemd/system/ ${BUILD_DIR}/usr/local/bin/
 
 	cp install/mount-helper-container.service $(BUILD_DIR)/etc/systemd/system/
-	cp install/share.conf $(BUILD_DIR)/etc/ibmshare/
 	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/usr/local/bin/
 	cp install/postinst.sh $(BUILD_DIR)/DEBIAN/postinst
 	cp install/prerm.sh $(BUILD_DIR)/DEBIAN/prerm
@@ -51,7 +50,7 @@ deb-build: build-linux
 	echo "Maintainer: $(MAINTAINER)" >> $(DEBIAN_CONTROL)
 	echo "Architecture: $(DEB_ARCH)" >> $(DEBIAN_CONTROL)
 	echo "Description: $(DESCRIPTION)" >> $(DEBIAN_CONTROL)
-	echo "Depends: mount.ibmshare (= 0.1.8)" >> $(DEBIAN_CONTROL)
+	echo "Depends: mount.ibmshare (= 0.1.9)" >> $(DEBIAN_CONTROL)
 
 	dpkg-deb --build $(BUILD_DIR)
 	rm -rf $(BUILD_DIR)
@@ -60,9 +59,8 @@ rpm-build:
 rpm-build: build-linux
 	rm -rf $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/
-	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/local/bin $(BUILD_DIR)/rpm/SOURCES/etc/systemd/system $(BUILD_DIR)/rpm/SOURCES/etc/ibmshare
+	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/local/bin $(BUILD_DIR)/rpm/SOURCES/etc/systemd/system
 	cp install/mount-helper-container.service $(BUILD_DIR)/rpm/SOURCES/etc/systemd/system
-	cp install/share.conf $(BUILD_DIR)/rpm/SOURCES/etc/ibmshare
 	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/rpm/SOURCES/usr/local/bin
 
 	echo "Name: $(NAME)" > $(REDHAT_SPEC)
@@ -71,7 +69,7 @@ rpm-build: build-linux
 	echo "Summary: $(DESCRIPTION)" >> $(REDHAT_SPEC)
 	echo "License: $(LICENSE)" >>  $(REDHAT_SPEC)
 	echo "BuildArch: $(RPM_ARCH)" >>  $(REDHAT_SPEC)
-	echo "Requires: mount.ibmshare = 0.1.8" >> $(REDHAT_SPEC)
+	echo "Requires: mount.ibmshare = 0.1.9" >> $(REDHAT_SPEC)
 	echo "%define _rpmfilename $(NAME)-$(APP_VERSION).rpm" >> $(REDHAT_SPEC)
 	echo "%build" >> $(REDHAT_SPEC)
 
@@ -79,7 +77,6 @@ rpm-build: build-linux
 	echo "rm -rf %{buildroot}" >> $(REDHAT_SPEC)
 	echo "mkdir -p %{buildroot}/etc/systemd/system/" >> $(REDHAT_SPEC)
 	echo "mkdir -p %{buildroot}/usr/local/bin/" >> $(REDHAT_SPEC)
-	echo "mkdir -p %{buildroot}/etc/ibmshare/" >> $(REDHAT_SPEC)
 	echo "cp -r %{_sourcedir}/* %{buildroot}/" >> $(REDHAT_SPEC)
 
 	echo "%description" >> $(REDHAT_SPEC)
@@ -88,7 +85,6 @@ rpm-build: build-linux
 	echo "%files" >> $(REDHAT_SPEC)
 	echo "/etc/systemd/system/mount-helper-container.service" >> $(REDHAT_SPEC)
 	echo "/usr/local/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
-	echo "/etc/ibmshare/share.conf" >> $(REDHAT_SPEC)
 
 	echo "%post" >> $(REDHAT_SPEC)
 	echo "systemctl enable mount-helper-container.service" >> $(REDHAT_SPEC)
