@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (c) IBM Corp. 2023. All Rights Reserved.
+# Copyright (c) IBM Corp. 2023-2026 All Rights Reserved.
 # Project name: VPC File Storage Mount Helper
 # This project is licensed under the MIT License, see LICENSE file in the root directory.
 
@@ -24,7 +24,7 @@ LINUX_INSTALL_APP=""
 INSTALL_APP="Unknown"
 NAME=$(grep -oP '(?<=^NAME=).+' /etc/os-release | tr -d '"')
 VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
-ARCH="uname -m"
+ARCH="$(uname -m)"
 MAJOR_VERSION=${VERSION%.*}
 INSTALLED_PACKAGE_LIST="/etc/pre_installed_packages.txt"
 DOWNLOADED_RHEL_PACKAGE_PATH="packages/rhel/$VERSION"
@@ -65,8 +65,55 @@ declare -A region_map=(
     ["ca-mon"]="ca-mon"
     ["in-che"]="in-che"
     ["in-mum"]="in-mum"
-    )
+)
 
+ENVIRONMENT="prod"          # prod | stage
+SKIP_UPDATE="false"         # true | false
+TLS_FLAG="false"            # true | false
+UNINSTALL_FLAG="false"      # true | false
+STUNNEL_ENABLED=false       # flipped true by --stunnel
+
+parse_token() {
+  case "$1" in
+    stage|--env=stage) ENVIRONMENT="stage" ;;
+    --env=prod)        ENVIRONMENT="prod"  ;;
+    --update)          SKIP_UPDATE="true"  ;;
+    --update-stage)    ENVIRONMENT="stage"; SKIP_UPDATE="true" ;;
+    --tls)             TLS_FLAG="true"     ;;
+    --uninstall|--uninstall*) UNINSTALL_FLAG="true" ;;
+    --stunnel)         STUNNEL_ENABLED=true ;;
+    region=*)          : ;;  
+    "" )               : ;;
+    *)                 : ;;  # ignore unknowns
+  esac
+}
+for tok in "$@"; do parse_token "$tok"; done
+
+# Normalize legacy positional vars so the rest of the script keeps working.
+# Many checks key off INSTALL_ARG for "stage", "--update", "--update-stage".
+if [ "$UNINSTALL_FLAG" = "true" ]; then
+  INSTALL_ARG="--uninstall"
+else
+  if [[ "${1:-}" == region=* ]]; then
+    : # leave INSTALL_ARG as-is (region=...)
+  else
+    if [ "$SKIP_UPDATE" = "true" ]; then
+      if [ "$ENVIRONMENT" = "stage" ]; then
+        INSTALL_ARG="--update-stage"
+      else
+        INSTALL_ARG="--update"
+      fi
+    else
+      if [ "$ENVIRONMENT" = "stage" ]; then
+        INSTALL_ARG="stage"
+      fi
+    fi
+  fi
+fi
+
+if [ "$TLS_FLAG" = "true" ]; then
+  INSTALL_MOUNT_OPTION_ARG="--tls"
+fi
 
 not_for_ppc () {
     echo $@ is not needed for PPC architechture since Ipsec is not supported. Silently ignoring.
@@ -102,6 +149,11 @@ exit_ok () {
     echo
     echo "$APP_NAME: $1."
     exit 0
+}
+
+is_reboot_required () {
+    rpm-ostree status | grep -q "pending deployment"
+    return $?
 }
 
 check_linux_version () {
@@ -574,29 +626,50 @@ wait_till_true () {
 check_python3_installed () {
     if ! reject_ipsec
     then
-    	if command_exist cloud-init; then
-        	log "Wait for cloud-init to complete."
-        	cloud-init status --wait --long
-    	fi
+        if command_exist cloud-init; then
+            log "Wait for cloud-init to complete."
+            cloud-init status --wait --long
+        fi
     fi
 
+    # ---------- RHEL / RHEL COREOS ----------
     if is_linux LINUX_RED_HAT || is_linux LINUX_RED_HAT_COREOS; then
-        PYTHON3_PACKAGE=packages/rhel/$VERSION/python*.rpm
-    elif ( is_linux LINUX_UBUNTU || is_linux LINUX_DEBIAN ); then
-        PYTHON3_PACKAGE=packages/ubuntu/$VERSION/python*.deb
+        PYTHON_RPM_GLOB="packages/rhel/$VERSION/python*.rpm"
+
+        if command_not_exist python3; then
+            log "Python3 not found. Installing from local RPMs (offline mode)."
+
+            if ! ls $PYTHON_RPM_GLOB >/dev/null 2>&1; then
+                exit_err "Python RPMs not found at $PYTHON_RPM_GLOB"
+            fi
+
+            rpm -i $PYTHON_RPM_GLOB --force --nodeps
+            check_result "Failed to install Python RPMs"
+        fi
+
+    # ---------- UBUNTU / DEBIAN ----------
+    elif is_linux LINUX_UBUNTU || is_linux LINUX_DEBIAN; then
+        PYTHON3_PACKAGE="packages/ubuntu/$VERSION/python*.deb"
+
+        if command_not_exist python3; then
+            _install_apps "$PYTHON3_PACKAGE"
+        fi
+
+    # ---------- FALLBACK ----------
     else
-        PYTHON3_PACKAGE=$1
+        if command_not_exist python3; then
+            if [ -z "$1" ]; then
+                exit_err "Python3 not installed"
+            fi
+            _install_apps "$1"
+        fi
     fi
-    if command_not_exist python3; then
-        if [ "$PYTHON3_PACKAGE" == "" ]; then
-            exit_err "Python3 not installed"
-        fi;
-        _install_apps "$PYTHON3_PACKAGE"
-    fi;
+
     PYTHON3_VERSION="$(get_current_python_version)"
     if version_less_than $PYTHON3_VERSION $MIN_PYTHON3_VERSION; then
-        exit_err  "Can only install with Python3 version $MIN_PYTHON3_VERSION or greater. Current version:$PYTHON3_VERSION"
-    fi;
+        exit_err "Can only install with Python3 version $MIN_PYTHON3_VERSION or greater. Current version:$PYTHON3_VERSION"
+    fi
+
     log "Python $PYTHON3_VERSION installed"
 }
 
@@ -663,14 +736,13 @@ setup_share_config() {
 
 service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
+    CURRENT_DIR=$(pwd)
     # Create copy of script in local binary directory
-    cp /root/install.sh /usr/local/bin/install-service.sh
+    cp $CURRENT_DIR/install.sh /usr/local/bin/install-service.sh
     # Make sure it's executable
     chmod +x /usr/local/bin/install-service.sh
     # Reset the SELinux label to the default for that directory
     restorecon -v /usr/local/bin/install-service.sh
-
-
     # Define the systemd service unit content
     SERVICE_UNIT_CONTENT="[Unit]
     Description=Restart StrongSwan service and load the cert using same install.sh script
@@ -679,7 +751,7 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
     [Service]
     Type=oneshot
-    WorkingDirectory=/root
+    WorkingDirectory=$CURRENT_DIR
     ExecStart=/usr/local/bin/install-service.sh --cert 
     ExecStartPost=/usr/bin/touch /var/lib/load-cert.done
     RemainAfterExit=true
@@ -716,9 +788,7 @@ init_mount_helper () {
         INSTALL_ARG=""
     fi
 
-    if [[ "$INSTALL_MOUNT_OPTION_ARG" == "stage" ]]; then
-        exit_err "incorrect command, pass stage as first arg."
-    fi
+    # Accept 'stage' in any position; no error if it was passed as $2
     if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
         check_tls_supported_linux_verion
     fi
@@ -729,6 +799,16 @@ init_mount_helper () {
         check_result "Problem installing ssl certs"
         if [[ "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
             install_tls_certificates $CERT_PATH
+        fi
+        # If stunnel mode was selected, install it in stage too
+        if [ "$STUNNEL_ENABLED" = "true" ]; then
+            if [ -x "./install_stunnel.sh" ]; then
+                echo "STUNNEL selected: installing stunnel (stage)..."
+                ./install_stunnel.sh install
+            else
+                echo "Error: install_stunnel.sh not found or not executable in current directory."
+                exit 1
+            fi
         fi
         exit_ok "Install completed ok"
     fi
@@ -741,7 +821,7 @@ init_mount_helper () {
         INSTALL_ARG="metadata"
     fi
 
-   	log "Installing certs for: $INSTALL_ARG"
+    log "Installing certs for: $INSTALL_ARG"
     CERT_PATH="./certs/$INSTALL_ARG"
     if [ ! -d $CERT_PATH ]; then
         exit_err "$CERT_PATH cert folder does not exist"
@@ -752,7 +832,7 @@ init_mount_helper () {
     $SBIN_SCRIPT -INSTALL_ROOT_CERT $CERT_PATH
     check_result "Problem installing ssl certs"
     if [[ "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
-      	install_tls_certificates $CERT_PATH
+        install_tls_certificates $CERT_PATH
     fi
     # Check if STUNNEL_ENABLED is set to true
     if [ "$STUNNEL_ENABLED" == "true" ]; then
@@ -780,55 +860,38 @@ init_mount_helper_for_rhcos () {
         fi
         INSTALL_ARG=""
     fi
-
-    if [[ "$INSTALL_MOUNT_OPTION_ARG" == "stage" ]]; then
-        exit_err "incorrect command, pass stage as first arg."
-    fi
+    
     if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
         check_tls_supported_linux_verion
     fi
-    if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]]; then
+    if [[ "$INSTALL_ARG" == "--cert" ]]; then
 
-            for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
+        for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
 
-                ENV_NAME="${entry%%|*}"
-                CERT_PATH="${entry##*|}"
+            ENV_NAME="${entry%%|*}"
+            CERT_PATH="${entry##*|}"
 
-                if [ ! -d "$CERT_PATH" ]; then
-                    exit_err "$CERT_PATH cert folder does not exist"
-                fi
+            if [ ! -d "$CERT_PATH" ]; then
+                exit_err "$CERT_PATH cert folder does not exist"
+            fi
 
-                log "Installing certs for $ENV_NAME environment..."
-                $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
-                check_result "Problem installing ssl certs"
-            done
+            log "Installing certs for $ENV_NAME environment..."
+            $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
+            check_result "Problem installing ssl certs"
+        done
     fi
-     # Check if STUNNEL_ENABLED is set to true
-    if [ "$STUNNEL_ENABLED" == "true" ]; then
-        echo "STUNNEL is enabled. Installing stunnel..."
-
-        # Make sure the script exists
-        if [ -x "./install_stunnel.sh" ]; then
-            ./install_stunnel.sh install
-        else
-            echo "Error: install_stunnel.sh not found or not executable in current directory."
-            exit 1
-        fi
-    fi
-    exit_ok "Install completed ok"
+    return 0
 
 }
 
 # main starts here.
 #
-if [[ "$INSTALL_ARG" == "--stunnel" ]]; then
-        STUNNEL_INSTALL_CMD="./install_stunnel.sh install"
-        STUNNEL_ENABLED=true
+if [ "$STUNNEL_ENABLED" = "true" ]; then
+  STUNNEL_INSTALL_CMD="./install_stunnel.sh install"
 else
-        STUNNEL_INSTALL_CMD="echo skipping stunnel..."
-
+  STUNNEL_INSTALL_CMD=":"
+  echo "skipping stunnel..."
 fi
-
 
 reject_ipsec && setup_share_config
 
@@ -896,7 +959,7 @@ if is_linux LINUX_RED_HAT; then
 
         # Read the package list from the file
         packages=()
-       	while IFS= read -r line; do
+        while IFS= read -r line; do
             packages+=("$line")
         done < "$PACKAGE_LIST_PATH"
 
@@ -946,26 +1009,26 @@ if is_linux LINUX_CENTOS; then
 fi;
 
 if is_linux LINUX_RED_HAT_COREOS; then
+    echo "RHCOS detected"
     # Do not install packages if --cert option is passed, since it must be already installed 
-    if [[ "$INSTALL_ARG" != "--cert" && "$INSTALL_MOUNT_OPTION_ARG" != "--cert" ]];  then
+    if [[ "$INSTALL_ARG" != "--cert" ]];  then
 
         check_python3_installed python3
-
         if reject_ipsec
         then
-            install_apps mount.ibmshare*.rpm && $STUNNEL_INSTALL_CMD
+            install_apps mount.ibmshare*.rpm
             exit $?
         fi
 
         if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
             # Define the path to the package list file based on the RHEL version
+
             PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
 
             # Check if the package list file exists
             if [ ! -f "$PACKAGE_LIST_PATH" ]; then
                 exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
             fi
-
             # Read the package list from the file
             packages=()
             while IFS= read -r line; do
@@ -988,11 +1051,23 @@ if is_linux LINUX_RED_HAT_COREOS; then
             exit_ok "Install packages completed ok"
 
         fi
+        if [ "$STUNNEL_ENABLED" == "true" ]; then
+            echo "STUNNEL is enabled. Running stunnel setup..."
+
+            # Make sure the script exists
+            if [ -x "./install_stunnel.sh" ]; then
+                ./install_stunnel.sh install
+            else
+                echo "Error: install_stunnel.sh not found or not executable in current directory."
+                exit 1
+            fi
+        fi
     # if install_arg == "--cert": then call etup_strongswan_restart_service, since after reboot only strongswan package is available  
-    elif [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]];  then
+    elif [[ "$INSTALL_ARG" == "--cert" ]];  then
         setup_strongswan_restart_service
         init_mount_helper_for_rhcos
     fi
+    exit_ok "Install completed ok"
 fi;
 
 if is_linux LINUX_ROCKY; then
