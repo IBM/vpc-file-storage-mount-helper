@@ -596,6 +596,9 @@ install_apps() {
         fi
         if is_linux LINUX_RED_HAT_COREOS; then
             remove_load_cert_service
+
+            # cleanup mount helper config
+            rm -f /etc/ibmshare/share.conf
         fi
         # Check if stunnel is installed
         if command -v stunnel >/dev/null 2>&1; then
@@ -721,23 +724,26 @@ install_tls_certificates() {
     fi
 }
 
-touch_conf_file() {
-    sudo touch  "$CONF_FILE"
-    sudo chmod 744  "$CONF_FILE"
-}
-
 setup_share_config() {
     DIR_NAME="/etc/ibmshare"
 
-    sudo mkdir -p $DIR_NAME
-    sudo chmod 744 $DIR_NAME
-    touch_conf_file
+    if is_linux LINUX_RED_HAT_COREOS; then
+        mkdir -p "$DIR_NAME"
+        chmod 744 "$DIR_NAME"
+        touch "$CONF_FILE"
+        chmod 744 "$CONF_FILE"
+    else
+        sudo mkdir -p "$DIR_NAME"
+        sudo chmod 744 "$DIR_NAME"
+        sudo touch "$CONF_FILE"
+        sudo chmod 744 "$CONF_FILE"
+    fi
 }
 
 service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
     # Create copy of script in local binary directory
-    cp /root/install.sh /usr/local/bin/install-service.sh
+    cp "$0" /usr/local/bin/install-service.sh
     # Make sure it's executable
     chmod +x /usr/local/bin/install-service.sh
     # Reset the SELinux label to the default for that directory
@@ -897,7 +903,10 @@ else
   echo "skipping stunnel..."
 fi
 
-reject_ipsec && setup_share_config
+# Ensure mount helper config exists
+if [ ! -f "$CONF_FILE" ]; then
+    setup_share_config
+fi
 
 if ( is_linux LINUX_UBUNTU || is_linux LINUX_DEBIAN ); then
     export DEBIAN_FRONTEND=noninteractive
