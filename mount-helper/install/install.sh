@@ -742,7 +742,6 @@ setup_share_config() {
 
 service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
-    CURRENT_DIR=$(pwd)
     # Create copy of script in local binary directory
     cp "$0" /usr/local/bin/install-service.sh
     # Make sure it's executable
@@ -757,7 +756,7 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
     [Service]
     Type=oneshot
-    WorkingDirectory=$CURRENT_DIR
+    WorkingDirectory=/opt/ipsec_certs
     ExecStart=/usr/local/bin/install-service.sh --cert 
     ExecStartPost=/usr/bin/touch /var/lib/load-cert.done
     RemainAfterExit=true
@@ -897,15 +896,6 @@ copy_certs_for_rhcos () {
     CERTS_SOURCE="./certs"
     CERT_DESTINATION_PATH="/opt/ipsec_certs"
     
-    # Verify source paths exist
-    if [ ! -d "$DEV_CERTS_SOURCE" ]; then
-        exit_err "Error: $DEV_CERTS_SOURCE directory does not exist"
-    fi
-    
-    if [ ! -d "$CERTS_SOURCE" ]; then
-        exit_err "Error: $CERTS_SOURCE directory does not exist"
-    fi
-    
     # Remove destination path if it already exists
     if [ -d "$CERT_DESTINATION_PATH" ]; then
         rm -rf "$CERT_DESTINATION_PATH"
@@ -932,7 +922,15 @@ copy_certs_for_rhcos () {
         exit_err "Error: Failed to copy $CERTS_SOURCE to $CERT_DESTINATION_PATH/certs"
     fi
     
-    log "Certificates copied successfully to $CERT_DESTINATION_PATH with dev_certs and certs subdirectories"
+    # Copy share.conf to persistent location so mount.ibmshare can find it in current directory
+    if [ -f "./share.conf" ]; then
+        cp "./share.conf" "$CERT_DESTINATION_PATH/share.conf"
+        if [ $? -ne 0 ]; then
+            exit_err "Error: Failed to copy ./share.conf to $CERT_DESTINATION_PATH/share.conf"
+        fi
+    fi
+    
+    log "Certificates and config copied successfully to $CERT_DESTINATION_PATH with dev_certs, certs and share.conf"
 }
 
 # main starts here.
