@@ -1039,7 +1039,6 @@ if is_linux LINUX_RED_HAT_COREOS; then
             install_apps "${packages[@]}" mount.ibmshare*.rpm
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
             init_mount_helper_for_rhcos
-            exit_ok "Install packages completed ok"
         
         else
             if [ "$INSTALL_ARG" != "--uninstall" ]; then
@@ -1048,7 +1047,6 @@ if is_linux LINUX_RED_HAT_COREOS; then
             install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
             init_mount_helper_for_rhcos
-            exit_ok "Install packages completed ok"
 
         fi
         if [ "$STUNNEL_ENABLED" == "true" ]; then
