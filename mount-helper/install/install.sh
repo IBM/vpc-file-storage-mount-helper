@@ -872,7 +872,7 @@ init_mount_helper_for_rhcos () {
     fi
     if [[ "$INSTALL_ARG" == "--cert" ]]; then
 
-        for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
+        for entry in "stage|/opt/ipsec_certs/dev_certs/metadata" "prod|/opt/ipsec_certs/certs/metadata"; do
 
             ENV_NAME="${entry%%|*}"
             CERT_PATH="${entry##*|}"
@@ -888,6 +888,51 @@ init_mount_helper_for_rhcos () {
     fi
     return 0
 
+}
+
+copy_certs_for_rhcos () {
+    # This method is used to copy certs to a persistent location for the mount helper to use, 
+    # since mount helper directory will be deleted before rebooting
+    DEV_CERTS_SOURCE="./dev_certs"
+    CERTS_SOURCE="./certs"
+    CERT_DESTINATION_PATH="/opt/ipsec_certs"
+    
+    # Verify source paths exist
+    if [ ! -d "$DEV_CERTS_SOURCE" ]; then
+        exit_err "Error: $DEV_CERTS_SOURCE directory does not exist"
+    fi
+    
+    if [ ! -d "$CERTS_SOURCE" ]; then
+        exit_err "Error: $CERTS_SOURCE directory does not exist"
+    fi
+    
+    # Remove destination path if it already exists
+    if [ -d "$CERT_DESTINATION_PATH" ]; then
+        rm -rf "$CERT_DESTINATION_PATH"
+        if [ $? -ne 0 ]; then
+            exit_err "Error: Failed to remove existing $CERT_DESTINATION_PATH"
+        fi
+    fi
+    
+    # Create destination directory
+    mkdir -p "$CERT_DESTINATION_PATH"
+    if [ $? -ne 0 ]; then
+        exit_err "Error: Failed to create $CERT_DESTINATION_PATH directory"
+    fi
+    
+    # Copy dev_certs directory
+    cp -r "$DEV_CERTS_SOURCE" "$CERT_DESTINATION_PATH/dev_certs"
+    if [ $? -ne 0 ]; then
+        exit_err "Error: Failed to copy $DEV_CERTS_SOURCE to $CERT_DESTINATION_PATH/dev_certs"
+    fi
+    
+    # Copy certs directory
+    cp -r "$CERTS_SOURCE" "$CERT_DESTINATION_PATH/certs"
+    if [ $? -ne 0 ]; then
+        exit_err "Error: Failed to copy $CERTS_SOURCE to $CERT_DESTINATION_PATH/certs"
+    fi
+    
+    log "Certificates copied successfully to $CERT_DESTINATION_PATH with dev_certs and certs subdirectories"
 }
 
 # main starts here.
@@ -1046,6 +1091,7 @@ if is_linux LINUX_RED_HAT_COREOS; then
 
             # Install the packages in the defined order
             install_apps "${packages[@]}" mount.ibmshare*.rpm
+            copy_certs_for_rhcos
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
             init_mount_helper_for_rhcos
         
@@ -1054,6 +1100,7 @@ if is_linux LINUX_RED_HAT_COREOS; then
                 rpm-ostree install --idempotent -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
             fi
             install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
+            copy_certs_for_rhcos
             service_to_install_cert_and_restart_strongswan_service_for_rhcos
             init_mount_helper_for_rhcos
 
