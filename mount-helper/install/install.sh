@@ -744,7 +744,7 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
     CURRENT_DIR=$(pwd)
     # Create copy of script in local binary directory
-    cp $CURRENT_DIR/install.sh /usr/local/bin/install-service.sh
+    cp "$0" /usr/local/bin/install-service.sh
     # Make sure it's executable
     chmod +x /usr/local/bin/install-service.sh
     # Reset the SELinux label to the default for that directory
