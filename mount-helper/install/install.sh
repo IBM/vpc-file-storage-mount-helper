@@ -736,14 +736,13 @@ setup_share_config() {
 
 service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
+    CURRENT_DIR=$(pwd)
     # Create copy of script in local binary directory
-    cp /root/install.sh /usr/local/bin/install-service.sh
+    cp $CURRENT_DIR/install.sh /usr/local/bin/install-service.sh
     # Make sure it's executable
     chmod +x /usr/local/bin/install-service.sh
     # Reset the SELinux label to the default for that directory
     restorecon -v /usr/local/bin/install-service.sh
-
-
     # Define the systemd service unit content
     SERVICE_UNIT_CONTENT="[Unit]
     Description=Restart StrongSwan service and load the cert using same install.sh script
@@ -752,7 +751,7 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
     [Service]
     Type=oneshot
-    WorkingDirectory=/root
+    WorkingDirectory=$CURRENT_DIR
     ExecStart=/usr/local/bin/install-service.sh --cert 
     ExecStartPost=/usr/bin/touch /var/lib/load-cert.done
     RemainAfterExit=true
@@ -861,28 +860,25 @@ init_mount_helper_for_rhcos () {
         fi
         INSTALL_ARG=""
     fi
-
-    if [[ "$INSTALL_MOUNT_OPTION_ARG" == "stage" ]]; then
-        exit_err "incorrect command, pass stage as first arg."
-    fi
+    
     if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
         check_tls_supported_linux_verion
     fi
-    if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]]; then
+    if [[ "$INSTALL_ARG" == "--cert" ]]; then
 
-            for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
+        for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
 
-                ENV_NAME="${entry%%|*}"
-                CERT_PATH="${entry##*|}"
+            ENV_NAME="${entry%%|*}"
+            CERT_PATH="${entry##*|}"
 
-                if [ ! -d "$CERT_PATH" ]; then
-                    exit_err "$CERT_PATH cert folder does not exist"
-                fi
+            if [ ! -d "$CERT_PATH" ]; then
+                exit_err "$CERT_PATH cert folder does not exist"
+            fi
 
-                log "Installing certs for $ENV_NAME environment..."
-                $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
-                check_result "Problem installing ssl certs"
-            done
+            log "Installing certs for $ENV_NAME environment..."
+            $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
+            check_result "Problem installing ssl certs"
+        done
     fi
     return 0
 
@@ -1014,77 +1010,61 @@ fi;
 
 if is_linux LINUX_RED_HAT_COREOS; then
     echo "RHCOS detected"
+    # Do not install packages if --cert option is passed, since it must be already installed 
+    if [[ "$INSTALL_ARG" != "--cert" ]];  then
 
-    check_python3_installed python3
-
-    #
-    # -------------------------------------------------
-    # Phase 1 — rpm-ostree pending reboot check
-    # -------------------------------------------------
-    #
-    if rpm-ostree status | grep -q "pending deployment"; then
-        echo ""
-        echo "=================================================="
-        echo "rpm-ostree changes detected."
-        echo "Reboot REQUIRED before continuing."
-        echo ""
-        echo "Run:"
-        echo "   systemctl reboot"
-        echo ""
-        exit 0
-    fi
-
-    #
-    # -------------------------------------------------
-    # Package Installation (Idempotent)
-    # -------------------------------------------------
-    #
-    if reject_ipsec
-    then
-        install_apps mount.ibmshare*.rpm
-        exit $?
-    fi
-
-    if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
-
-        PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
-
-        if [ ! -f "$PACKAGE_LIST_PATH" ]; then
-            exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
+        check_python3_installed python3
+        if reject_ipsec
+        then
+            install_apps mount.ibmshare*.rpm
+            exit $?
         fi
 
-        packages=()
-        while IFS= read -r line; do
-            packages+=("$line")
-        done < "$PACKAGE_LIST_PATH"
+        if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
+            # Define the path to the package list file based on the RHEL version
 
-        install_apps "${packages[@]}" mount.ibmshare*.rpm
+            PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
 
-    else
-        rpm-ostree install --idempotent -y \
-            "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
+            # Check if the package list file exists
+            if [ ! -f "$PACKAGE_LIST_PATH" ]; then
+                exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
+            fi
+            # Read the package list from the file
+            packages=()
+            while IFS= read -r line; do
+                packages+=("$line")
+            done < "$PACKAGE_LIST_PATH"
 
-        install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
+            # Install the packages in the defined order
+            install_apps "${packages[@]}" mount.ibmshare*.rpm
+            service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            init_mount_helper_for_rhcos
+        
+        else
+            if [ "$INSTALL_ARG" != "--uninstall" ]; then
+                rpm-ostree install --idempotent -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
+            fi
+            install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
+            service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            init_mount_helper_for_rhcos
+
+        fi
+        if [ "$STUNNEL_ENABLED" == "true" ]; then
+            echo "STUNNEL is enabled. Running stunnel setup..."
+
+            # Make sure the script exists
+            if [ -x "./install_stunnel.sh" ]; then
+                ./install_stunnel.sh install
+            else
+                echo "Error: install_stunnel.sh not found or not executable in current directory."
+                exit 1
+            fi
+        fi
+    # if install_arg == "--cert": then call etup_strongswan_restart_service, since after reboot only strongswan package is available  
+    elif [[ "$INSTALL_ARG" == "--cert" ]];  then
+        setup_strongswan_restart_service
+        init_mount_helper_for_rhcos
     fi
-
-    #
-    # -------------------------------------------------
-    # Certificates + Config
-    # -------------------------------------------------
-    #
-    service_to_install_cert_and_restart_strongswan_service_for_rhcos
-    init_mount_helper_for_rhcos
-
-    #
-    # -------------------------------------------------
-    # STUNNEL (POST-REBOOT SAFE)
-    # -------------------------------------------------
-    #
-    if [[ "$STUNNEL_ENABLED" == "true" ]]; then
-        echo "Running stunnel setup..."
-        ./install_stunnel.sh install
-    fi
-
     exit_ok "Install completed ok"
 fi;
 
