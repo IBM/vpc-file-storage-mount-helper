@@ -72,6 +72,8 @@ SKIP_UPDATE="false"         # true | false
 TLS_FLAG="false"            # true | false
 UNINSTALL_FLAG="false"      # true | false
 STUNNEL_ENABLED=false       # flipped true by --stunnel
+# Configurable certificate destination path 
+CERT_DESTINATION_PATH="${CERT_DEST_PATH:-/opt/ipsec_certs}" # (can be overridden via CERT_DEST_PATH environment variable)
 
 parse_token() {
   case "$1" in
@@ -740,7 +742,7 @@ setup_share_config() {
     fi
 }
 
-service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
+setup_rhcos_cert_and_strongswan_service(){
 
     # Create copy of script in local binary directory
     cp "$0" /usr/local/bin/install-service.sh
@@ -756,7 +758,8 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
     [Service]
     Type=oneshot
-    WorkingDirectory=/opt/ipsec_certs
+    WorkingDirectory=$CERT_DESTINATION_PATH
+    Environment=\"CERT_DEST_PATH=$CERT_DESTINATION_PATH\"
     ExecStart=/usr/local/bin/install-service.sh --cert 
     ExecStartPost=/usr/bin/touch /var/lib/load-cert.done
     RemainAfterExit=true
@@ -776,6 +779,9 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
             systemctl daemon-reload
             # Enable the service
             systemctl enable load-cert.service
+            
+            # Setup strongswan restart service for RHCOS
+            setup_strongswan_restart_service
         fi
     fi
 }
@@ -871,7 +877,7 @@ init_mount_helper_for_rhcos () {
     fi
     if [[ "$INSTALL_ARG" == "--cert" ]]; then
 
-        for entry in "stage|/opt/ipsec_certs/dev_certs/metadata" "prod|/opt/ipsec_certs/certs/metadata"; do
+        for entry in "stage|$CERT_DESTINATION_PATH/dev_certs/metadata" "prod|$CERT_DESTINATION_PATH/certs/metadata"; do
 
             ENV_NAME="${entry%%|*}"
             CERT_PATH="${entry##*|}"
@@ -889,12 +895,23 @@ init_mount_helper_for_rhcos () {
 
 }
 
+cleanup_persistent_certs () {
+    # Clean up persistent certs directory after certificates are loaded
+    if [ -d "$CERT_DESTINATION_PATH" ]; then
+        rm -rf "$CERT_DESTINATION_PATH"
+        if [ $? -eq 0 ]; then
+            log "Cleaned up $CERT_DESTINATION_PATH directory"
+        else
+            log "Warning: Could not clean up $CERT_DESTINATION_PATH directory"
+        fi
+    fi
+}
+
 copy_certs_for_rhcos () {
     # This method is used to copy certs to a persistent location for the mount helper to use, 
     # since mount helper directory will be deleted before rebooting
     DEV_CERTS_SOURCE="./dev_certs"
     CERTS_SOURCE="./certs"
-    CERT_DESTINATION_PATH="/opt/ipsec_certs"
     
     # Remove destination path if it already exists
     if [ -d "$CERT_DESTINATION_PATH" ]; then
@@ -1090,7 +1107,7 @@ if is_linux LINUX_RED_HAT_COREOS; then
             # Install the packages in the defined order
             install_apps "${packages[@]}" mount.ibmshare*.rpm
             copy_certs_for_rhcos
-            service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            setup_rhcos_cert_and_strongswan_service
             init_mount_helper_for_rhcos
         
         else
@@ -1099,7 +1116,7 @@ if is_linux LINUX_RED_HAT_COREOS; then
             fi
             install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
             copy_certs_for_rhcos
-            service_to_install_cert_and_restart_strongswan_service_for_rhcos
+            setup_rhcos_cert_and_strongswan_service
             init_mount_helper_for_rhcos
 
         fi
@@ -1114,10 +1131,15 @@ if is_linux LINUX_RED_HAT_COREOS; then
                 exit 1
             fi
         fi
-    # if install_arg == "--cert": then call etup_strongswan_restart_service, since after reboot only strongswan package is available  
+    # if install_arg == "--cert": then load certs and clean up after reboot
     elif [[ "$INSTALL_ARG" == "--cert" ]];  then
-        setup_strongswan_restart_service
         init_mount_helper_for_rhcos
+        # Clean up certs only after the load-cert service has completed
+        if [ -f "/var/lib/load-cert.done" ]; then
+            cleanup_persistent_certs
+        else
+            log "Skipping cleanup of certs: /var/lib/load-cert.done not found, certs may not have been used yet."
+        fi
     fi
     exit_ok "Install completed ok"
 fi;
