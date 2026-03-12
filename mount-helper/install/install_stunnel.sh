@@ -17,11 +17,6 @@ if [ ! -f "$CONF_FILE" ]; then
     exit 1
 fi
 
-SUDO="sudo"
-
-if [[ "$OS_TYPE" == "rhcos" ]]; then
-    SUDO=""
-fi
 
 # Base path: packages folder sits next to this script
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -85,7 +80,7 @@ store_kv() {
     $SUDO mkdir -p "$(dirname "$CONF_FILE")"
     $SUDO touch "$CONF_FILE"
     $SUDO sed -i.bak "/^${k}=*/d" "$CONF_FILE"
-    echo "${k}=${v}" | sudo tee -a "$CONF_FILE" >/dev/null
+    echo "${k}=${v}" | $SUDO tee -a "$CONF_FILE" >/dev/null
 }
 
 store_stunnel_env() {
@@ -226,6 +221,7 @@ install_stunnel_rhcos() {
     echo "=================================================="
     echo "stunnel installation staged successfully."
     echo "Reboot REQUIRED to activate changes."
+    echo "After reboot run: install_stunnel.sh install"
     echo "=================================================="
     echo ""
 }
@@ -278,6 +274,11 @@ if [[ "$ID" == "rhcos" ]] || [[ "${VARIANT_ID:-}" == *"coreos"* ]]; then
     OS_TYPE="rhcos"
 else
     OS_TYPE="$ID"
+fi
+
+SUDO="sudo"
+if [[ "$OS_TYPE" == "rhcos" ]]; then
+    SUDO=""
 fi
 
 case "$OS_TYPE" in
