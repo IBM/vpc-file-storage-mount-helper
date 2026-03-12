@@ -16,6 +16,13 @@ if [ ! -f "$CONF_FILE" ]; then
     echo ""
     exit 1
 fi
+
+SUDO="sudo"
+
+if [[ "$OS_TYPE" == "rhcos" ]]; then
+    SUDO=""
+fi
+
 # Base path: packages folder sits next to this script
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 PACKAGES_BASE="${SCRIPT_DIR}/packages"
@@ -68,16 +75,16 @@ EOF
 
 setup_stunnel_directories() {
     local DIR_LIST="/var/run/stunnel4/ /etc/stunnel /var/log/stunnel"
-    sudo mkdir -p $DIR_LIST
-    sudo chmod 744 $DIR_LIST
+    $SUDO mkdir -p $DIR_LIST
+    $SUDO chmod 744 $DIR_LIST
 }
 
 store_kv() {
     local k="$1"
     local v="$2"
-    sudo mkdir -p "$(dirname "$CONF_FILE")"
-    sudo touch "$CONF_FILE"
-    sudo sed -i.bak "/^${k}=*/d" "$CONF_FILE"
+    $SUDO mkdir -p "$(dirname "$CONF_FILE")"
+    $SUDO touch "$CONF_FILE"
+    $SUDO sed -i.bak "/^${k}=*/d" "$CONF_FILE"
     echo "${k}=${v}" | sudo tee -a "$CONF_FILE" >/dev/null
 }
 
