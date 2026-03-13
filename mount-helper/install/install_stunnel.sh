@@ -5,21 +5,24 @@ INSTALL="install"
 UNINSTALL="uninstall"
 CONF_FILE=/etc/ibmshare/share.conf
 
-if [ ! -f "$CONF_FILE" ]; then
-    echo ""
-    echo "ERROR: share.conf not found."
-    echo "Mount helper not initialized yet."
-    echo ""
-    echo "If this is first install on RHCOS:"
-    echo "  1. Reboot node"
-    echo "  2. Run install.sh --stunnel again"
-    echo ""
-    exit 1
-fi
-
 # Base path: packages folder sits next to this script
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 PACKAGES_BASE="${SCRIPT_DIR}/packages"
+
+ACTION="$(echo "${1:-$INSTALL}" | tr '[:upper:]' '[:lower:]')"
+
+if [[ "$ACTION" == "$INSTALL" && ! -f "$CONF_FILE" ]]; then
+    mkdir -p /etc/ibmshare
+    cp "$SCRIPT_DIR/share.conf" "$CONF_FILE"
+    echo "Default share.conf initialized at $CONF_FILE"
+fi
+
+if [[ "$ACTION" == "$UNINSTALL" ]]; then
+    if [ -f "$CONF_FILE" ]; then
+        rm -f "$CONF_FILE"
+        echo "Removed $CONF_FILE"
+    fi
+fi
 
 # Temporary: Add a test certificate to /etc/stunnel if stunnel is installed
 # This is a non-production test certificate used only during development.
@@ -69,17 +72,44 @@ EOF
 
 setup_stunnel_directories() {
     local DIR_LIST="/var/run/stunnel4/ /etc/stunnel /var/log/stunnel"
-    $SUDO mkdir -p $DIR_LIST
-    $SUDO chmod 744 $DIR_LIST
+    sudo mkdir -p $DIR_LIST
+    sudo chmod 744 $DIR_LIST
+}
+
+setup_stunnel_directories_rhcos() {
+    local DIR_LIST="/var/run/stunnel4/ /etc/stunnel /var/log/stunnel"
+    mkdir -p $DIR_LIST
+    chmod 744 $DIR_LIST
 }
 
 store_kv() {
     local k="$1"
     local v="$2"
-    $SUDO mkdir -p "$(dirname "$CONF_FILE")"
-    $SUDO touch "$CONF_FILE"
-    $SUDO sed -i.bak "/^${k}=*/d" "$CONF_FILE"
-    echo "${k}=${v}" | $SUDO tee -a "$CONF_FILE" >/dev/null
+    sudo mkdir -p "$(dirname "$CONF_FILE")"
+    sudo touch "$CONF_FILE"
+    sudo sed -i.bak "/^${k}=*/d" "$CONF_FILE"
+    echo "${k}=${v}" | sudo tee -a "$CONF_FILE" >/dev/null
+}
+
+store_kv_rhcos() {
+    local k="$1"
+    local v="$2"
+    mkdir -p "$(dirname "$CONF_FILE")"
+    touch "$CONF_FILE"
+    sed -i.bak "/^${k}=*/d" "$CONF_FILE"
+    echo "${k}=${v}" | tee -a "$CONF_FILE" >/dev/null
+}
+
+store_stunnel_env_rhcos() {
+    store_kv_rhcos STUNNEL_ENV "${STUNNEL_ENV:-}"
+}
+
+store_trusted_ca_file_name_rhcos() {
+    store_kv_rhcos TRUSTED_ROOT_CACERT "$*"
+}
+
+store_arch_env_rhcos() {
+    store_kv_rhcos ARCH_ENV "$(uname -m)"
 }
 
 store_stunnel_env() {
@@ -183,24 +213,21 @@ install_stunnel_rhcos() {
     echo "RHCOS offline-first installation path selected"
     echo "Offline stunnel install (RHCOS)…"
 
-    #
-    # Runtime phase (after reboot)
-    #
-    if rpm -q stunnel >/dev/null 2>&1; then
-        echo "stunnel already installed. Running runtime configuration..."
-
-        setup_stunnel_directories
-        create_stunnel_cert_if_installed
-        store_trusted_ca_file_name "/etc/pki/tls/certs/ca-bundle.crt"
-        store_stunnel_env
-        store_arch_env
-
-        echo "Runtime configuration completed."
-        return 0
+    if ! grep -q TRUSTED_ROOT_CACERT "$CONF_FILE"; then
+        store_trusted_ca_file_name_rhcos "/etc/pki/tls/certs/ca-bundle.crt"
     fi
 
     #
-    # Install phase (first run)
+    # Execute runtime configuration
+    #
+    setup_stunnel_directories_rhcos
+    create_stunnel_cert_if_installed
+    store_trusted_ca_file_name_rhcos "/etc/pki/tls/certs/ca-bundle.crt"
+    store_stunnel_env_rhcos
+    store_arch_env_rhcos
+
+    #
+    # Install stunnel RPM
     #
     STUNNEL_RPM=$(find "${PACKAGES_BASE}/rhel" -type f -name "stunnel*.rpm" | head -1)
 
@@ -220,7 +247,6 @@ install_stunnel_rhcos() {
     echo "=================================================="
     echo "stunnel installation staged successfully."
     echo "Reboot REQUIRED to activate changes."
-    echo "After reboot run: install_stunnel.sh install"
     echo "=================================================="
     echo ""
 }
@@ -274,11 +300,6 @@ else
     OS_TYPE="$ID"
 fi
 
-SUDO="sudo"
-if [[ "$OS_TYPE" == "rhcos" ]]; then
-    SUDO=""
-fi
-
 case "$OS_TYPE" in
     ubuntu|debian)
         if [ "$ACTION" = "$INSTALL" ]; then
@@ -317,7 +338,6 @@ esac
 }
 
 # Default action is install
-ACTION="$(echo "${1:-$INSTALL}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$ACTION" != "$INSTALL" && "$ACTION" != "$UNINSTALL" ]]; then
     echo "Use: install|uninstall"
     exit 1
