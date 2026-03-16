@@ -213,18 +213,11 @@ install_stunnel_rhcos() {
     echo "RHCOS offline-first installation path selected"
     echo "Offline stunnel install (RHCOS)…"
 
-    # if ! grep -q TRUSTED_ROOT_CACERT "$CONF_FILE"; then
-    #     store_trusted_ca_file_name_rhcos "/etc/pki/tls/certs/ca-bundle.crt"
-    # fi
-
     #
     # Execute runtime configuration
     #
     setup_stunnel_directories_rhcos
     create_stunnel_cert_if_installed
-    # store_trusted_ca_file_name_rhcos "/etc/pki/tls/certs/ca-bundle.crt"
-    # store_stunnel_env_rhcos
-    # store_arch_env_rhcos
 
     #
     # Install stunnel RPM
