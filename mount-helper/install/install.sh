@@ -906,6 +906,26 @@ cleanup_persistent_certs () {
         fi
     fi
 }
+# store stunnel environment variable, trusted ca cert path and architecture info in share.conf for mount helper to use in stunnel mode on RHCOS
+store_kv_rhcos() {
+    local k="$1"
+    local v="$2"
+    local target_file="./share.conf"
+    sed -i.bak "/^${k}=*/d" "$target_file"
+    echo "${k}=${v}" | tee -a "$target_file" >/dev/null
+}
+
+store_stunnel_env_rhcos() {
+    store_kv_rhcos STUNNEL_ENV "${STUNNEL_ENV:-}"
+}
+
+store_trusted_ca_file_name_rhcos() {
+    store_kv_rhcos TRUSTED_ROOT_CACERT "$*"
+}
+
+store_arch_env_rhcos() {
+    store_kv_rhcos ARCH_ENV "$(uname -m)"
+}
 
 copy_certs_for_rhcos () {
     # This method is used to copy certs to a persistent location for the mount helper to use, 
@@ -937,6 +957,14 @@ copy_certs_for_rhcos () {
     cp -r "$CERTS_SOURCE" "$CERT_DESTINATION_PATH/certs"
     if [ $? -ne 0 ]; then
         exit_err "Error: Failed to copy $CERTS_SOURCE to $CERT_DESTINATION_PATH/certs"
+    fi
+
+    # if stunnel is enabled, configure stunnel environment variables in share.conf, post reboot this file gets copied to /etc/ibmshare/share.conf by mount helper and mount helper will use these environment variables to decide stunnel behavior
+    if [ "$STUNNEL_ENABLED" = "true" ]; then
+        store_stunnel_env_rhcos
+        store_trusted_ca_file_name_rhcos "/etc/pki/tls/certs/ca-bundle.crt"
+        store_arch_env_rhcos
+        log "Stunnel environment configured in share.conf with STUNNEL_ENV=${STUNNEL_ENV:-}, TRUSTED_ROOT_CACERT=/etc/pki/tls/certs/ca-bundle.crt and ARCH_ENV=$(uname -m)"
     fi
     
     # Copy share.conf to persistent location so mount.ibmshare can find it in current directory
