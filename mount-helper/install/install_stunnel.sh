@@ -222,7 +222,26 @@ install_stunnel_rhcos() {
     #
     # Install stunnel RPM
     #
-    STUNNEL_RPM=$(find "${PACKAGES_BASE}/rhel" -type f -name "stunnel*.rpm" | head -1)
+    # Detect OS version
+    . /etc/os-release
+
+    RHEL_VERSION="$VERSION_ID"
+
+    # Construct expected RPM path
+    STUNNEL_RPM_PATTERN="${PACKAGES_BASE}/rhel/${RHEL_VERSION}/stunnel*.rpm"
+
+    # Validate RPM exists for this OS version
+    if ! ls ${STUNNEL_RPM_PATTERN} >/dev/null 2>&1; then
+        echo "ERROR: No stunnel RPM found for RHEL version ${RHEL_VERSION}"
+        echo "Expected path: ${PACKAGES_BASE}/rhel/${RHEL_VERSION}/"
+        exit 1
+    fi
+
+    # Select the RPM
+    STUNNEL_RPM=$(ls ${STUNNEL_RPM_PATTERN} | head -1)
+
+    echo "Detected OS version: ${RHEL_VERSION}"
+    echo "Using stunnel RPM: ${STUNNEL_RPM}"
 
     if [ -z "$STUNNEL_RPM" ]; then
         echo ""
