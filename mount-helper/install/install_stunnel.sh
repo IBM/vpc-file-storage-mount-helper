@@ -5,20 +5,24 @@ INSTALL="install"
 UNINSTALL="uninstall"
 CONF_FILE=/etc/ibmshare/share.conf
 
-if [ ! -f "$CONF_FILE" ]; then
-    echo ""
-    echo "ERROR: share.conf not found."
-    echo "Mount helper not initialized yet."
-    echo ""
-    echo "If this is first install on RHCOS:"
-    echo "  1. Reboot node"
-    echo "  2. Run install.sh --stunnel again"
-    echo ""
-    exit 1
-fi
 # Base path: packages folder sits next to this script
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 PACKAGES_BASE="${SCRIPT_DIR}/packages"
+
+ACTION="$(echo "${1:-$INSTALL}" | tr '[:upper:]' '[:lower:]')"
+
+if [[ "$ACTION" == "$INSTALL" && ! -f "$CONF_FILE" ]]; then
+    mkdir -p /etc/ibmshare
+    cp "$SCRIPT_DIR/share.conf" "$CONF_FILE"
+    echo "Default share.conf initialized at $CONF_FILE"
+fi
+
+if [[ "$ACTION" == "$UNINSTALL" ]]; then
+    if [ -f "$CONF_FILE" ]; then
+        rm -f "$CONF_FILE"
+        echo "Removed $CONF_FILE"
+    fi
+fi
 
 # Temporary: Add a test certificate to /etc/stunnel if stunnel is installed
 # This is a non-production test certificate used only during development.
@@ -72,6 +76,12 @@ setup_stunnel_directories() {
     sudo chmod 744 $DIR_LIST
 }
 
+setup_stunnel_directories_rhcos() {
+    local DIR_LIST="/var/run/stunnel4/ /etc/stunnel /var/log/stunnel"
+    mkdir -p $DIR_LIST
+    chmod 744 $DIR_LIST
+}
+
 store_kv() {
     local k="$1"
     local v="$2"
@@ -79,6 +89,27 @@ store_kv() {
     sudo touch "$CONF_FILE"
     sudo sed -i.bak "/^${k}=*/d" "$CONF_FILE"
     echo "${k}=${v}" | sudo tee -a "$CONF_FILE" >/dev/null
+}
+
+store_kv_rhcos() {
+    local k="$1"
+    local v="$2"
+    mkdir -p "$(dirname "$CONF_FILE")"
+    touch "$CONF_FILE"
+    sed -i.bak "/^${k}=*/d" "$CONF_FILE"
+    echo "${k}=${v}" | tee -a "$CONF_FILE" >/dev/null
+}
+
+store_stunnel_env_rhcos() {
+    store_kv_rhcos STUNNEL_ENV "${STUNNEL_ENV:-}"
+}
+
+store_trusted_ca_file_name_rhcos() {
+    store_kv_rhcos TRUSTED_ROOT_CACERT "$*"
+}
+
+store_arch_env_rhcos() {
+    store_kv_rhcos ARCH_ENV "$(uname -m)"
 }
 
 store_stunnel_env() {
@@ -177,6 +208,61 @@ install_stunnel_suse() {
     fi
 }
 
+install_stunnel_rhcos() {
+
+    echo "RHCOS offline-first installation path selected"
+    echo "Offline stunnel install (RHCOS)…"
+
+    #
+    # Execute runtime configuration
+    #
+    setup_stunnel_directories_rhcos
+    create_stunnel_cert_if_installed
+
+    #
+    # Install stunnel RPM
+    #
+    # Detect OS version
+    . /etc/os-release
+
+    RHEL_VERSION="$VERSION_ID"
+
+    # Construct expected RPM path
+    STUNNEL_RPM_PATTERN="${PACKAGES_BASE}/rhel/${RHEL_VERSION}/stunnel*.rpm"
+
+    # Validate RPM exists for this OS version
+    if ! ls ${STUNNEL_RPM_PATTERN} >/dev/null 2>&1; then
+        echo "ERROR: No stunnel RPM found for RHEL version ${RHEL_VERSION}"
+        echo "Expected path: ${PACKAGES_BASE}/rhel/${RHEL_VERSION}/"
+        exit 1
+    fi
+
+    # Select the RPM
+    STUNNEL_RPM=$(ls ${STUNNEL_RPM_PATTERN} | head -1)
+
+    echo "Detected OS version: ${RHEL_VERSION}"
+    echo "Using stunnel RPM: ${STUNNEL_RPM}"
+
+    if [ -z "$STUNNEL_RPM" ]; then
+        echo ""
+        echo "ERROR: stunnel RPM not found."
+        echo "Offline installation required for RHCOS."
+        exit 1
+    fi
+
+    echo "Installing stunnel from offline RPM:"
+    echo "  $STUNNEL_RPM"
+
+    rpm-ostree install -y --idempotent "$STUNNEL_RPM"
+
+    echo ""
+    echo "=================================================="
+    echo "stunnel installation staged successfully."
+    echo "Reboot REQUIRED to activate changes."
+    echo "=================================================="
+    echo ""
+}
+
 # Uninstall stunnel on Ubuntu/Debian-based systems
 uninstall_stunnel_ubuntu_debian() {
   echo "Uninstalling stunnel (Ubuntu/Debian)…"
@@ -243,53 +329,10 @@ case "$OS_TYPE" in
         ;;
     rhcos)
         if [ "$ACTION" = "$INSTALL" ]; then
-            echo "RHCOS offline-first installation path selected"
-
-            #
-            # -------------------------------------------------
-            # Runtime phase (after reboot)
-            # -------------------------------------------------
-            #
-            if rpm -q stunnel >/dev/null 2>&1; then
-                echo "stunnel already installed. Running runtime configuration..."
-
-                setup_stunnel_directories
-                create_stunnel_cert_if_installed
-                store_trusted_ca_file_name "/etc/pki/tls/certs/ca-bundle.crt"
-                store_stunnel_env
-                store_arch_env
-
-                echo "Runtime configuration completed."
-                exit 0
-            fi
-
-            #
-            # -------------------------------------------------
-            # Install phase (first run)
-            # -------------------------------------------------
-            #
-            STUNNEL_RPM=$(find "${PACKAGES_BASE}/rhel" -type f -name "stunnel*.rpm" | head -1)
-
-            if [ -z "$STUNNEL_RPM" ]; then
-                echo ""
-                echo "ERROR: stunnel RPM not found."
-                echo "Offline installation required for RHCOS."
-                exit 1
-            fi
-
-            echo "Installing stunnel from offline RPM:"
-            echo "  $STUNNEL_RPM"
-
-            rpm-ostree install -y --idempotent "$STUNNEL_RPM"
-
-            echo ""
-            echo "=================================================="
-            echo "stunnel installation staged successfully."
-            echo "Reboot REQUIRED to activate changes."
-            echo "=================================================="
-            echo ""
-
-            exit 0
+            install_stunnel_rhcos
+        else
+            echo "Uninstalling stunnel on RHCOS..."
+            rpm-ostree uninstall stunnel || true
         fi
         ;;
     suse|sles)
@@ -307,7 +350,6 @@ esac
 }
 
 # Default action is install
-ACTION="$(echo "${1:-$INSTALL}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$ACTION" != "$INSTALL" && "$ACTION" != "$UNINSTALL" ]]; then
     echo "Use: install|uninstall"
     exit 1

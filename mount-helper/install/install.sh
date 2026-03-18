@@ -72,6 +72,8 @@ SKIP_UPDATE="false"         # true | false
 TLS_FLAG="false"            # true | false
 UNINSTALL_FLAG="false"      # true | false
 STUNNEL_ENABLED=false       # flipped true by --stunnel
+# Configurable certificate destination path 
+CERT_DESTINATION_PATH="${CERT_DEST_PATH:-/opt/ipsec_certs}" # (can be overridden via CERT_DEST_PATH environment variable)
 
 parse_token() {
   case "$1" in
@@ -596,6 +598,9 @@ install_apps() {
         fi
         if is_linux LINUX_RED_HAT_COREOS; then
             remove_load_cert_service
+
+            # cleanup mount helper config
+            rm -f /etc/ibmshare/share.conf
         fi
         # Check if stunnel is installed
         if command -v stunnel >/dev/null 2>&1; then
@@ -721,29 +726,30 @@ install_tls_certificates() {
     fi
 }
 
-touch_conf_file() {
-    sudo touch  "$CONF_FILE"
-    sudo chmod 744  "$CONF_FILE"
-}
-
 setup_share_config() {
     DIR_NAME="/etc/ibmshare"
 
-    sudo mkdir -p $DIR_NAME
-    sudo chmod 744 $DIR_NAME
-    touch_conf_file
+    if is_linux LINUX_RED_HAT_COREOS; then
+        mkdir -p "$DIR_NAME"
+        chmod 744 "$DIR_NAME"
+        touch "$CONF_FILE"
+        chmod 744 "$CONF_FILE"
+    else
+        sudo mkdir -p "$DIR_NAME"
+        sudo chmod 744 "$DIR_NAME"
+        sudo touch "$CONF_FILE"
+        sudo chmod 744 "$CONF_FILE"
+    fi
 }
 
-service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
+setup_rhcos_cert_and_strongswan_service(){
 
     # Create copy of script in local binary directory
-    cp /root/install.sh /usr/local/bin/install-service.sh
+    cp "$0" /usr/local/bin/install-service.sh
     # Make sure it's executable
     chmod +x /usr/local/bin/install-service.sh
     # Reset the SELinux label to the default for that directory
     restorecon -v /usr/local/bin/install-service.sh
-
-
     # Define the systemd service unit content
     SERVICE_UNIT_CONTENT="[Unit]
     Description=Restart StrongSwan service and load the cert using same install.sh script
@@ -752,7 +758,8 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
 
     [Service]
     Type=oneshot
-    WorkingDirectory=/root
+    WorkingDirectory=$CERT_DESTINATION_PATH
+    Environment=\"CERT_DEST_PATH=$CERT_DESTINATION_PATH\"
     ExecStart=/usr/local/bin/install-service.sh --cert 
     ExecStartPost=/usr/bin/touch /var/lib/load-cert.done
     RemainAfterExit=true
@@ -772,6 +779,9 @@ service_to_install_cert_and_restart_strongswan_service_for_rhcos(){
             systemctl daemon-reload
             # Enable the service
             systemctl enable load-cert.service
+            
+            # Setup strongswan restart service for RHCOS
+            setup_strongswan_restart_service
         fi
     fi
 }
@@ -861,31 +871,111 @@ init_mount_helper_for_rhcos () {
         fi
         INSTALL_ARG=""
     fi
-
-    if [[ "$INSTALL_MOUNT_OPTION_ARG" == "stage" ]]; then
-        exit_err "incorrect command, pass stage as first arg."
-    fi
+    
     if [[ "$INSTALL_ARG" == "--tls" || "$INSTALL_MOUNT_OPTION_ARG" == "--tls" ]]; then
         check_tls_supported_linux_verion
     fi
-    if [[ "$INSTALL_ARG" == "--cert" || "$INSTALL_MOUNT_OPTION_ARG" == "--cert" ]]; then
+    if [[ "$INSTALL_ARG" == "--cert" ]]; then
 
-            for entry in "stage|./dev_certs/metadata" "prod|./certs/metadata"; do
+        for entry in "stage|$CERT_DESTINATION_PATH/dev_certs/metadata" "prod|$CERT_DESTINATION_PATH/certs/metadata"; do
 
-                ENV_NAME="${entry%%|*}"
-                CERT_PATH="${entry##*|}"
+            ENV_NAME="${entry%%|*}"
+            CERT_PATH="${entry##*|}"
 
-                if [ ! -d "$CERT_PATH" ]; then
-                    exit_err "$CERT_PATH cert folder does not exist"
-                fi
+            if [ ! -d "$CERT_PATH" ]; then
+                exit_err "$CERT_PATH cert folder does not exist"
+            fi
 
-                log "Installing certs for $ENV_NAME environment..."
-                $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
-                check_result "Problem installing ssl certs"
-            done
+            log "Installing certs for $ENV_NAME environment..."
+            $SBIN_SCRIPT -INSTALL_ROOT_CERT "$CERT_PATH"
+            check_result "Problem installing ssl certs"
+        done
     fi
     return 0
 
+}
+
+cleanup_persistent_certs () {
+    # Clean up persistent certs directory after certificates are loaded
+    if [ -d "$CERT_DESTINATION_PATH" ]; then
+        rm -rf "$CERT_DESTINATION_PATH"
+        if [ $? -eq 0 ]; then
+            log "Cleaned up $CERT_DESTINATION_PATH directory"
+        else
+            log "Warning: Could not clean up $CERT_DESTINATION_PATH directory"
+        fi
+    fi
+}
+# store stunnel environment variable, trusted ca cert path and architecture info in share.conf for mount helper to use in stunnel mode on RHCOS
+store_kv_rhcos() {
+    local k="$1"
+    local v="$2"
+    local target_file="./share.conf"
+    sed -i.bak "/^${k}=*/d" "$target_file"
+    echo "${k}=${v}" | tee -a "$target_file" >/dev/null
+}
+
+store_stunnel_env_rhcos() {
+    store_kv_rhcos STUNNEL_ENV "${STUNNEL_ENV:-}"
+}
+
+store_trusted_ca_file_name_rhcos() {
+    store_kv_rhcos TRUSTED_ROOT_CACERT "$*"
+}
+
+store_arch_env_rhcos() {
+    store_kv_rhcos ARCH_ENV "$(uname -m)"
+}
+
+copy_certs_for_rhcos () {
+    # This method is used to copy certs to a persistent location for the mount helper to use, 
+    # since mount helper directory will be deleted before rebooting
+    DEV_CERTS_SOURCE="./dev_certs"
+    CERTS_SOURCE="./certs"
+    
+    # Remove destination path if it already exists
+    if [ -d "$CERT_DESTINATION_PATH" ]; then
+        rm -rf "$CERT_DESTINATION_PATH"
+        if [ $? -ne 0 ]; then
+            exit_err "Error: Failed to remove existing $CERT_DESTINATION_PATH"
+        fi
+    fi
+    
+    # Create destination directory
+    mkdir -p "$CERT_DESTINATION_PATH"
+    if [ $? -ne 0 ]; then
+        exit_err "Error: Failed to create $CERT_DESTINATION_PATH directory"
+    fi
+    
+    # Copy dev_certs directory
+    cp -r "$DEV_CERTS_SOURCE" "$CERT_DESTINATION_PATH/dev_certs"
+    if [ $? -ne 0 ]; then
+        exit_err "Error: Failed to copy $DEV_CERTS_SOURCE to $CERT_DESTINATION_PATH/dev_certs"
+    fi
+    
+    # Copy certs directory
+    cp -r "$CERTS_SOURCE" "$CERT_DESTINATION_PATH/certs"
+    if [ $? -ne 0 ]; then
+        exit_err "Error: Failed to copy $CERTS_SOURCE to $CERT_DESTINATION_PATH/certs"
+    fi
+
+    # if stunnel is enabled, configure stunnel environment variables in share.conf, post reboot this file gets copied to /etc/ibmshare/share.conf by mount helper and mount helper will use these environment variables to decide stunnel behavior
+    if [ "$STUNNEL_ENABLED" = "true" ]; then
+        store_stunnel_env_rhcos
+        store_trusted_ca_file_name_rhcos "/etc/pki/tls/certs/ca-bundle.crt"
+        store_arch_env_rhcos
+        log "Stunnel environment configured in share.conf with STUNNEL_ENV=${STUNNEL_ENV:-}, TRUSTED_ROOT_CACERT=/etc/pki/tls/certs/ca-bundle.crt and ARCH_ENV=$(uname -m)"
+    fi
+    
+    # Copy share.conf to persistent location so mount.ibmshare can find it in current directory
+    if [ -f "./share.conf" ]; then
+        cp "./share.conf" "$CERT_DESTINATION_PATH/share.conf"
+        if [ $? -ne 0 ]; then
+            exit_err "Error: Failed to copy ./share.conf to $CERT_DESTINATION_PATH/share.conf"
+        fi
+    fi
+    
+    log "Certificates and config copied successfully to $CERT_DESTINATION_PATH with dev_certs, certs and share.conf"
 }
 
 # main starts here.
@@ -897,7 +987,10 @@ else
   echo "skipping stunnel..."
 fi
 
-reject_ipsec && setup_share_config
+# Ensure mount helper config exists
+if [ ! -f "$CONF_FILE" ]; then
+    setup_share_config
+fi
 
 if ( is_linux LINUX_UBUNTU || is_linux LINUX_DEBIAN ); then
     export DEBIAN_FRONTEND=noninteractive
@@ -1014,77 +1107,68 @@ fi;
 
 if is_linux LINUX_RED_HAT_COREOS; then
     echo "RHCOS detected"
+    # Do not install packages if --cert option is passed, since it must be already installed 
+    if [[ "$INSTALL_ARG" != "--cert" ]];  then
 
-    check_python3_installed python3
-
-    #
-    # -------------------------------------------------
-    # Phase 1 — rpm-ostree pending reboot check
-    # -------------------------------------------------
-    #
-    if rpm-ostree status | grep -q "pending deployment"; then
-        echo ""
-        echo "=================================================="
-        echo "rpm-ostree changes detected."
-        echo "Reboot REQUIRED before continuing."
-        echo ""
-        echo "Run:"
-        echo "   systemctl reboot"
-        echo ""
-        exit 0
-    fi
-
-    #
-    # -------------------------------------------------
-    # Package Installation (Idempotent)
-    # -------------------------------------------------
-    #
-    if reject_ipsec
-    then
-        install_apps mount.ibmshare*.rpm
-        exit $?
-    fi
-
-    if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
-
-        PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
-
-        if [ ! -f "$PACKAGE_LIST_PATH" ]; then
-            exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
+        check_python3_installed python3
+        if reject_ipsec
+        then
+            install_apps mount.ibmshare*.rpm
+            exit $?
         fi
 
-        packages=()
-        while IFS= read -r line; do
-            packages+=("$line")
-        done < "$PACKAGE_LIST_PATH"
+        if [ -d "$DOWNLOADED_RHEL_PACKAGE_PATH" ]; then
+            # Define the path to the package list file based on the RHEL version
 
-        install_apps "${packages[@]}" mount.ibmshare*.rpm
+            PACKAGE_LIST_PATH="packages/rhel/$VERSION/package_list"
 
-    else
-        rpm-ostree install --idempotent -y \
-            "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
+            # Check if the package list file exists
+            if [ ! -f "$PACKAGE_LIST_PATH" ]; then
+                exit_err "Package list file '$PACKAGE_LIST_PATH' does not exist"
+            fi
+            # Read the package list from the file
+            packages=()
+            while IFS= read -r line; do
+                packages+=("$line")
+            done < "$PACKAGE_LIST_PATH"
 
-        install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
+            # Install the packages in the defined order
+            install_apps "${packages[@]}" mount.ibmshare*.rpm
+            copy_certs_for_rhcos
+            setup_rhcos_cert_and_strongswan_service
+            init_mount_helper_for_rhcos
+        
+        else
+            if [ "$INSTALL_ARG" != "--uninstall" ]; then
+                rpm-ostree install --idempotent -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm"
+            fi
+            install_apps strongswan nfs-utils iptables mount.ibmshare*.rpm
+            copy_certs_for_rhcos
+            setup_rhcos_cert_and_strongswan_service
+            init_mount_helper_for_rhcos
+
+        fi
+        if [ "$STUNNEL_ENABLED" == "true" ]; then
+            echo "STUNNEL is enabled. Running stunnel setup..."
+
+            # Make sure the script exists
+            if [ -x "./install_stunnel.sh" ]; then
+                ./install_stunnel.sh install
+            else
+                echo "Error: install_stunnel.sh not found or not executable in current directory."
+                exit 1
+            fi
+        fi
+    # if install_arg == "--cert": then load certs and clean up after reboot
+    elif [[ "$INSTALL_ARG" == "--cert" ]];  then
+        init_mount_helper_for_rhcos
+        # Clean up certs only after the load-cert service has completed
+        if [ -f "/var/lib/load-cert.done" ]; then
+            cleanup_persistent_certs
+        else
+            log "Skipping cleanup of certs: /var/lib/load-cert.done not found, certs may not have been used yet."
+        fi
     fi
-
-    #
-    # -------------------------------------------------
-    # Certificates + Config
-    # -------------------------------------------------
-    #
-    service_to_install_cert_and_restart_strongswan_service_for_rhcos
-    init_mount_helper_for_rhcos
-
-    #
-    # -------------------------------------------------
-    # STUNNEL (POST-REBOOT SAFE)
-    # -------------------------------------------------
-    #
-    if [[ "$STUNNEL_ENABLED" == "true" ]]; then
-        echo "Running stunnel setup..."
-        ./install_stunnel.sh install
-    fi
-
     exit_ok "Install completed ok"
 fi;
 
