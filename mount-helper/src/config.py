@@ -287,6 +287,8 @@ class StrongSwanConfig(IpsecConfigBase):
                 rekey_bytes = 0
             }
         }
+        unique = replace
+        dpd_delay = 30s
         keyingtries = 3
         version = 2
         remote_addrs = <REMOTE_IP>
