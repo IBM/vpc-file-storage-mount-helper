@@ -18,7 +18,7 @@ export LINT_VERSION="1.43.0"
 GOPACKAGES=$(shell go list ./... | grep -v /vendor/ | grep -v /tests)
 
 NAME := mount-helper-container
-APP_VERSION := 0.1.5
+APP_VERSION := 0.1.4
 MAINTAINER := "IKS Storage"
 DESCRIPTION := "IBM Mount-helper-container service"
 LICENSE := "IBM"
@@ -59,23 +59,17 @@ rpm-build: build-linux
 	rm -rf $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/bin
 	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system
-	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system-preset
 
-	# Copy binary
+	# Copy files to SOURCES
 	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/rpm/SOURCES/usr/bin/
-
-	# Copy service file
 	cp install/mount-helper-container.service $(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system/
-
-	echo "enable mount-helper-container.service" > \
-		$(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system-preset/99-mount-helper.preset
 
 	# Create SPEC file
 	echo "Name: $(NAME)" > $(REDHAT_SPEC)
 	echo "Version: $(APP_VERSION)" >> $(REDHAT_SPEC)
 	echo "Release: $(RPM_RELEASE_NUM)" >> $(REDHAT_SPEC)
-	echo 'Summary: $(DESCRIPTION)' >> $(REDHAT_SPEC)
-	echo 'License: $(LICENSE)' >> $(REDHAT_SPEC)
+	echo "Summary: $(DESCRIPTION)" >> $(REDHAT_SPEC)
+	echo "License: $(LICENSE)" >> $(REDHAT_SPEC)
 	echo "BuildArch: $(RPM_ARCH)" >> $(REDHAT_SPEC)
 	echo "%define _rpmfilename $(NAME)-$(APP_VERSION).rpm" >> $(REDHAT_SPEC)
 
@@ -88,20 +82,22 @@ rpm-build: build-linux
 	echo "rm -rf %{buildroot}" >> $(REDHAT_SPEC)
 	echo "mkdir -p %{buildroot}/usr/bin/" >> $(REDHAT_SPEC)
 	echo "mkdir -p %{buildroot}/usr/lib/systemd/system/" >> $(REDHAT_SPEC)
-	echo "mkdir -p %{buildroot}/usr/lib/systemd/system-preset/" >> $(REDHAT_SPEC)
 
 	echo "cp %{_sourcedir}/usr/bin/mount-helper-container-server %{buildroot}/usr/bin/" >> $(REDHAT_SPEC)
 	echo "cp %{_sourcedir}/usr/lib/systemd/system/mount-helper-container.service %{buildroot}/usr/lib/systemd/system/" >> $(REDHAT_SPEC)
-	echo "cp %{_sourcedir}/usr/lib/systemd/system-preset/99-mount-helper.preset %{buildroot}/usr/lib/systemd/system-preset/" >> $(REDHAT_SPEC)
 	echo "chmod +x %{buildroot}/usr/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
 
 	echo "%files" >> $(REDHAT_SPEC)
 	echo "/usr/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
 	echo "/usr/lib/systemd/system/mount-helper-container.service" >> $(REDHAT_SPEC)
-	echo "/usr/lib/systemd/system-preset/99-mount-helper.preset" >> $(REDHAT_SPEC)
 
 	echo "%post" >> $(REDHAT_SPEC)
-	echo "/bin/systemctl daemon-reload >/dev/null 2>&1 || true" >> $(REDHAT_SPEC)
+	echo "/bin/systemctl enable mount-helper-container.service >/dev/null 2>&1 || true" >> $(REDHAT_SPEC)
+	echo "/bin/systemctl start mount-helper-container.service >/dev/null 2>&1 || true" >> $(REDHAT_SPEC)
+
+	echo "%preun" >> $(REDHAT_SPEC)
+	echo "systemctl stop mount-helper-container.service || true" >> $(REDHAT_SPEC)
+	echo "systemctl disable mount-helper-container.service || true" >> $(REDHAT_SPEC)
 
 	# Build RPM
 	rpmbuild -ba --define "_topdir $(PWD)/$(BUILD_DIR)/rpm" \
