@@ -25,6 +25,7 @@ This is a REST based mount-helper-container service which is used for mounting E
 | 0.1.1 | mount.ibmshare-0.1.7 | v0.2.0 | July 30, 2025 | - Changed mount.ibmshare dep to 0.1.0 (Add Support fo RHEL 9.6 + Mh misc changes https://github.com/IBM/vpc-file-storage-mount-helper/compare/0.1.4...0.1.9) |
 | 0.1.2 | mount.ibmshare-0.1.7 | v0.2.1 | August 5, 2025 | - Fixed bug in deb control file |
 | 0.1.3 | mount.ibmshare-0.1.8 | v0.2.2 | Sep 1, 2025 | - Add offline packages support for RHEL 9.5 |
+| 0.1.4 | mount.ibmshare-0.1.9 | v0.2.2 | March 18, 2026 | - Add stunnel support |
 
 ## Package Building
 
