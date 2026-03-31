@@ -18,7 +18,7 @@ export LINT_VERSION="1.43.0"
 GOPACKAGES=$(shell go list ./... | grep -v /vendor/ | grep -v /tests)
 
 NAME := mount-helper-container
-APP_VERSION := 0.1.5
+APP_VERSION := 0.1.4
 MAINTAINER := "IKS Storage"
 DESCRIPTION := "IBM Mount-helper-container service"
 LICENSE := "IBM"
@@ -57,12 +57,12 @@ deb-build: build-linux
 rpm-build:
 rpm-build: build-linux
 	rm -rf $(BUILD_DIR)
-	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/bin
-	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system
+	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/local/bin
+	mkdir -p $(BUILD_DIR)/rpm/SOURCES/etc/systemd/system
 
 	# Copy files to SOURCES
-	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/rpm/SOURCES/usr/bin/
-	cp install/mount-helper-container.service $(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system/
+	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/rpm/SOURCES/usr/local/bin/
+	cp install/mount-helper-container.service $(BUILD_DIR)/rpm/SOURCES/etc/systemd/system/
 
 	# Create SPEC file
 	echo "Name: $(NAME)" > $(REDHAT_SPEC)
@@ -80,16 +80,16 @@ rpm-build: build-linux
 
 	echo "%install" >> $(REDHAT_SPEC)
 	echo "rm -rf %{buildroot}" >> $(REDHAT_SPEC)
-	echo "mkdir -p %{buildroot}/usr/bin/" >> $(REDHAT_SPEC)
-	echo "mkdir -p %{buildroot}/usr/lib/systemd/system/" >> $(REDHAT_SPEC)
+	echo "mkdir -p %{buildroot}/usr/local/bin/" >> $(REDHAT_SPEC)
+	echo "mkdir -p %{buildroot}/etc/systemd/system/" >> $(REDHAT_SPEC)
 
-	echo "cp %{_sourcedir}/usr/bin/mount-helper-container-server %{buildroot}/usr/bin/" >> $(REDHAT_SPEC)
-	echo "cp %{_sourcedir}/usr/lib/systemd/system/mount-helper-container.service %{buildroot}/usr/lib/systemd/system/" >> $(REDHAT_SPEC)
-	echo "chmod +x %{buildroot}/usr/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
+	echo "cp %{_sourcedir}/usr/local/bin/mount-helper-container-server %{buildroot}/usr/local/bin/" >> $(REDHAT_SPEC)
+	echo "cp %{_sourcedir}/etc/systemd/system/mount-helper-container.service %{buildroot}/etc/systemd/system/" >> $(REDHAT_SPEC)
+	echo "chmod +x %{buildroot}/usr/local/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
 
 	echo "%files" >> $(REDHAT_SPEC)
-	echo "/usr/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
-	echo "/usr/lib/systemd/system/mount-helper-container.service" >> $(REDHAT_SPEC)
+	echo "/usr/local/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
+	echo "/etc/systemd/system/mount-helper-container.service" >> $(REDHAT_SPEC)
 
 	echo "%post" >> $(REDHAT_SPEC)
 	echo "/bin/systemctl enable mount-helper-container.service >/dev/null 2>&1 || true" >> $(REDHAT_SPEC)
