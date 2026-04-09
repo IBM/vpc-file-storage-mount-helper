@@ -18,7 +18,7 @@ export LINT_VERSION="1.43.0"
 GOPACKAGES=$(shell go list ./... | grep -v /vendor/ | grep -v /tests)
 
 NAME := mount-helper-container
-APP_VERSION := 0.1.3
+APP_VERSION := 0.1.4
 MAINTAINER := "IKS Storage"
 DESCRIPTION := "IBM Mount-helper-container service"
 LICENSE := "IBM"
@@ -38,11 +38,10 @@ deb-build:
 deb-build: build-linux
 	rm -rf $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)/DEBIAN
-	mkdir -p ${BUILD_DIR}/etc/systemd/system/ ${BUILD_DIR}/usr/local/bin/ $(BUILD_DIR)/etc/ibmshare
+	mkdir -p ${BUILD_DIR}/etc/systemd/system/ ${BUILD_DIR}/usr/bin/
 
 	cp install/mount-helper-container.service $(BUILD_DIR)/etc/systemd/system/
-	cp install/share.conf $(BUILD_DIR)/etc/ibmshare/
-	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/usr/local/bin/
+	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/usr/bin/
 	cp install/postinst.sh $(BUILD_DIR)/DEBIAN/postinst
 	cp install/prerm.sh $(BUILD_DIR)/DEBIAN/prerm
 
@@ -51,7 +50,6 @@ deb-build: build-linux
 	echo "Maintainer: $(MAINTAINER)" >> $(DEBIAN_CONTROL)
 	echo "Architecture: $(DEB_ARCH)" >> $(DEBIAN_CONTROL)
 	echo "Description: $(DESCRIPTION)" >> $(DEBIAN_CONTROL)
-	echo "Depends: mount.ibmshare (= 0.1.8)" >> $(DEBIAN_CONTROL)
 
 	dpkg-deb --build $(BUILD_DIR)
 	rm -rf $(BUILD_DIR)
@@ -59,47 +57,54 @@ deb-build: build-linux
 rpm-build:
 rpm-build: build-linux
 	rm -rf $(BUILD_DIR)
-	mkdir -p $(BUILD_DIR)/
-	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/local/bin $(BUILD_DIR)/rpm/SOURCES/etc/systemd/system $(BUILD_DIR)/rpm/SOURCES/etc/ibmshare
-	cp install/mount-helper-container.service $(BUILD_DIR)/rpm/SOURCES/etc/systemd/system
-	cp install/share.conf $(BUILD_DIR)/rpm/SOURCES/etc/ibmshare
-	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/rpm/SOURCES/usr/local/bin
+	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/bin
+	mkdir -p $(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system
 
+	# Copy files to SOURCES
+	cp ${BIN_DIR}/mount-helper-container-server $(BUILD_DIR)/rpm/SOURCES/usr/bin/
+	cp install/mount-helper-container.service $(BUILD_DIR)/rpm/SOURCES/usr/lib/systemd/system/
+
+	# Create SPEC file
 	echo "Name: $(NAME)" > $(REDHAT_SPEC)
 	echo "Version: $(APP_VERSION)" >> $(REDHAT_SPEC)
 	echo "Release: $(RPM_RELEASE_NUM)" >> $(REDHAT_SPEC)
 	echo "Summary: $(DESCRIPTION)" >> $(REDHAT_SPEC)
-	echo "License: $(LICENSE)" >>  $(REDHAT_SPEC)
-	echo "BuildArch: $(RPM_ARCH)" >>  $(REDHAT_SPEC)
-	echo "Requires: mount.ibmshare = 0.1.8" >> $(REDHAT_SPEC)
+	echo "License: $(LICENSE)" >> $(REDHAT_SPEC)
+	echo "BuildArch: $(RPM_ARCH)" >> $(REDHAT_SPEC)
 	echo "%define _rpmfilename $(NAME)-$(APP_VERSION).rpm" >> $(REDHAT_SPEC)
+
+	echo "%description" >> $(REDHAT_SPEC)
+	echo "IBM Mount helper container service" >> $(REDHAT_SPEC)
+
 	echo "%build" >> $(REDHAT_SPEC)
 
 	echo "%install" >> $(REDHAT_SPEC)
 	echo "rm -rf %{buildroot}" >> $(REDHAT_SPEC)
-	echo "mkdir -p %{buildroot}/etc/systemd/system/" >> $(REDHAT_SPEC)
-	echo "mkdir -p %{buildroot}/usr/local/bin/" >> $(REDHAT_SPEC)
-	echo "mkdir -p %{buildroot}/etc/ibmshare/" >> $(REDHAT_SPEC)
-	echo "cp -r %{_sourcedir}/* %{buildroot}/" >> $(REDHAT_SPEC)
+	echo "mkdir -p %{buildroot}/usr/bin/" >> $(REDHAT_SPEC)
+	echo "mkdir -p %{buildroot}/usr/lib/systemd/system/" >> $(REDHAT_SPEC)
 
-	echo "%description" >> $(REDHAT_SPEC)
-	echo "This package provides the IBM Mount Share helper container service."
+	echo "cp %{_sourcedir}/usr/bin/mount-helper-container-server %{buildroot}/usr/bin/" >> $(REDHAT_SPEC)
+	echo "cp %{_sourcedir}/usr/lib/systemd/system/mount-helper-container.service %{buildroot}/usr/lib/systemd/system/" >> $(REDHAT_SPEC)
+	echo "chmod +x %{buildroot}/usr/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
 
 	echo "%files" >> $(REDHAT_SPEC)
-	echo "/etc/systemd/system/mount-helper-container.service" >> $(REDHAT_SPEC)
-	echo "/usr/local/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
-	echo "/etc/ibmshare/share.conf" >> $(REDHAT_SPEC)
+	echo "/usr/bin/mount-helper-container-server" >> $(REDHAT_SPEC)
+	echo "/usr/lib/systemd/system/mount-helper-container.service" >> $(REDHAT_SPEC)
 
 	echo "%post" >> $(REDHAT_SPEC)
-	echo "systemctl enable mount-helper-container.service" >> $(REDHAT_SPEC)
-	echo "systemctl start mount-helper-container.service" >> $(REDHAT_SPEC)
+	echo "/bin/systemctl enable mount-helper-container.service >/dev/null 2>&1 || true" >> $(REDHAT_SPEC)
+	echo "/bin/systemctl start mount-helper-container.service >/dev/null 2>&1 || true" >> $(REDHAT_SPEC)
 
 	echo "%preun" >> $(REDHAT_SPEC)
 	echo "systemctl stop mount-helper-container.service || true" >> $(REDHAT_SPEC)
 	echo "systemctl disable mount-helper-container.service || true" >> $(REDHAT_SPEC)
 
-	rpmbuild -ba --build-in-place --define "_topdir $(PWD)/$(BUILD_DIR)/rpm" $(REDHAT_SPEC)
-	cp  $(BUILD_DIR)/rpm/RPMS/* ./
+	# Build RPM
+	rpmbuild -ba --define "_topdir $(PWD)/$(BUILD_DIR)/rpm" \
+		--define "_sourcedir $(PWD)/$(BUILD_DIR)/rpm/SOURCES" \
+		$(REDHAT_SPEC)
+
+	cp $(BUILD_DIR)/rpm/RPMS/* ./
 	rm -rf $(BUILD_DIR)
 
 tar-package:
