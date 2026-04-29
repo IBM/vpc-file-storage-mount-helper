@@ -40,7 +40,7 @@ func init() {
 
 var (
 	logger     *zap.Logger
-	socketDir  = "/var/lib/"
+	socketDir  = "/run/ibm-vpc-file-csi/"
 	socketPath = socketDir + "ibmshare.sock"
 )
 
