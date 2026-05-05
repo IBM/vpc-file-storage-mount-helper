@@ -81,6 +81,11 @@ func setUpLogger() *zap.Logger {
 }
 
 func main() {
+	// Ensure the socket directory exists
+	if err := os.MkdirAll(socketDir, 0755); err != nil {
+		logger.Fatal("Failed to create socket directory:", zap.Error(err))
+	}
+
 	// Always create fresh socket file
 	os.Remove(socketPath)
 
