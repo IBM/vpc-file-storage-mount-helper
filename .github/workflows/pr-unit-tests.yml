@@ -3,7 +3,7 @@ name: PR Unit Tests
 on:
   pull_request:
     branches:
-      - main 
+      - main
 
 jobs:
   test:
@@ -22,8 +22,8 @@ jobs:
     - name: Install Strongswan For Testing IPSec Service In Unit Tests
       if: ${{ matrix.package_dir == 'mount-helper' }}
       run: |
-          sudo apt-get update
-          sudo apt-get install -y charon-systemd
+        sudo apt update
+        sudo apt install -y charon-systemd
 
     - name: Run Unit Tests for mount helper
       if: ${{ matrix.package_dir == 'mount-helper' }}
@@ -32,4 +32,3 @@ jobs:
     - name: Run Unit Tests for mount helper container
       if: ${{ matrix.package_dir == 'mount-helper-container' }}
       run: sudo make ut-coverage -C ${{ matrix.package_dir }}
-

@@ -87,6 +87,10 @@ jobs:
         tag_name: 0.2.5
         name: 0.2.5
         body: |
+          - Conf changes to enable quick ipsec mounts recovery during backend upgrade
+          - Added offline packages support for RHEL 9.5
+          - Supporting PPC for RHEL 9.4
+          - Added the root and int certs for CHE 
           - Add support for stunnel
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v2
