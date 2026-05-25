@@ -88,6 +88,7 @@ jobs:
         name: 0.2.7
         body: |
           - Fixed an issue where the installation of the mount helper package would fail in case of update.
+    - name: Initialize CodeQL
       uses: github/codeql-action/init@v2
 
     - name: Perform CodeQL Analysis Mount Helper Code
