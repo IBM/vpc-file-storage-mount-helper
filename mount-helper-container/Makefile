@@ -18,7 +18,7 @@ export LINT_VERSION="1.43.0"
 GOPACKAGES=$(shell go list ./... | grep -v /vendor/ | grep -v /tests)
 
 NAME := mount-helper-container
-APP_VERSION := 0.1.4
+APP_VERSION := 0.1.5
 MAINTAINER := "IKS Storage"
 DESCRIPTION := "IBM Mount-helper-container service"
 LICENSE := "IBM"
@@ -96,8 +96,7 @@ rpm-build: build-linux
 	echo "/bin/systemctl start mount-helper-container.service >/dev/null 2>&1 || true" >> $(REDHAT_SPEC)
 
 	echo "%preun" >> $(REDHAT_SPEC)
-	echo "systemctl stop mount-helper-container.service || true" >> $(REDHAT_SPEC)
-	echo "systemctl disable mount-helper-container.service || true" >> $(REDHAT_SPEC)
+	echo "%systemd_preun mount-helper-container.service" >> $(REDHAT_SPEC)
 
 	# Build RPM
 	rpmbuild -ba --define "_topdir $(PWD)/$(BUILD_DIR)/rpm" \
