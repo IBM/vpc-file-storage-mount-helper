@@ -1,6 +1,6 @@
 module server
 
-go 1.25.12
+go 1.26.0
 
 require github.com/gin-gonic/gin v1.9.1
 
@@ -32,10 +32,10 @@ require (
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	go.uber.org/zap v1.25.0
 	golang.org/x/arch v0.4.0 // indirect
-	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
-	google.golang.org/protobuf v1.33.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
