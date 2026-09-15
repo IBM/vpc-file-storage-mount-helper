@@ -139,8 +139,8 @@ startservice: build-linux
 	systemctl start mount-helper-container
 
 test:
-	go test -v -timeout 1800s -coverprofile=cover.out ./...
-	go tool cover -html=cover.out -o=cover.html
+	go test -v -timeout 1800s -coverprofile=cover.out ./... && \
+	if [ -f cover.out ]; then go tool cover -html=cover.out -o=cover.html || true; fi
 
 ut-coverage: test
 	@./scripts/coverage.sh

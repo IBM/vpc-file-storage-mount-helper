@@ -34,15 +34,27 @@ import (
 func TestMainFunction(t *testing.T) {
 	// Positive Test Case
 	t.Run("Main Function Success", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "mhc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.RemoveAll(tmpDir) })
+		origSocketDir := socketDir
+		origSocketPath := socketPath
+		socketDir = tmpDir + "/"
+		socketPath = socketDir + "s.sock"
+		t.Cleanup(func() {
+			socketDir = origSocketDir
+			socketPath = origSocketPath
+		})
+
 		// Mock the server to return a 200 OK response
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer mockServer.Close()
 
-		os.Setenv("SOCKET_PATH", mockServer.URL)
 		go func() {
-			defer os.Unsetenv("SOCKET_PATH")
 			main()
 		}()
 
