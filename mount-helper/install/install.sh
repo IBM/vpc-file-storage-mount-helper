@@ -825,7 +825,9 @@ init_mount_helper () {
         if [ "$STUNNEL_ENABLED" = "true" ]; then
             if [ -x "./install_stunnel.sh" ]; then
                 echo "STUNNEL selected: installing stunnel (stage)..."
-                ./install_stunnel.sh install
+                if ! ./install_stunnel.sh install; then
+                    exit_err "Stunnel installation/configuration failed"
+                fi
             else
                 echo "Error: install_stunnel.sh not found or not executable in current directory."
                 exit 1
@@ -861,7 +863,9 @@ init_mount_helper () {
 
         # Make sure the script exists
         if [ -x "./install_stunnel.sh" ]; then
-            ./install_stunnel.sh install
+            if ! ./install_stunnel.sh install; then
+                exit_err "Stunnel installation/configuration failed"
+            fi
         else
             echo "Error: install_stunnel.sh not found or not executable in current directory."
             exit 1
@@ -1169,7 +1173,9 @@ if is_linux LINUX_RED_HAT_COREOS; then
 
             # Make sure the script exists
             if [ -x "./install_stunnel.sh" ]; then
-                ./install_stunnel.sh install
+                if ! ./install_stunnel.sh install; then
+                    exit_err "Stunnel installation/configuration failed"
+                fi
             else
                 echo "Error: install_stunnel.sh not found or not executable in current directory."
                 exit 1

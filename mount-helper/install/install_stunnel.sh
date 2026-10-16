@@ -79,7 +79,7 @@ verify_stunnel_installed() {
 }
 
 # -------- CONFIG --------
-if [[ "$ACTION" == "$INSTALL" && ! -f "$CONF_FILE" ]]; then
+if [[ "$ACTION" == "$INSTALL" ]] && ! sudo test -s "$CONF_FILE"; then
     log "Initializing share.conf"
     sudo mkdir -p /etc/ibmshare
     sudo cp "$SCRIPT_DIR/share.conf" "$CONF_FILE"
